@@ -4,7 +4,7 @@ ImageSaver is a Tool/Library for saving binary Data on Services, which normally 
 
 ImageSaver was developed to upload any Files (Music, Documents, Movies, Images, ...) to services like Flickr or Google Photos, which provide 1TB (Flickr) or unlimited (Google Photos) Storage Space.
 
-WARNING: This currently is a personal hobby project, so its neither 'finished' nor 'bug-free' or 'stable'. But it currently works without any major flaws. If you want to contribute just let me know :)
+WARNING: This Project is currently a personal hobby project, so its neither 'finished' nor 'bug-free' or 'stable', But it currently works without any major flaws. If you want to contribute just let me know :)
 
 ### When is a Service a supported Service?
 
