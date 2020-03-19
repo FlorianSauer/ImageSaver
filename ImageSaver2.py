@@ -111,7 +111,8 @@ class ImageSaverApp(object):
     argparser.add_argument('--debug', help="Print debug infos", action='store_true')
     argparser.add_argument('--dbecho', help="Print debug infos of DB Connection", action='store_true')
     argparser.add_argument('-s', '--silent', help="Does not print progress bars", action='store_true')
-    argparser.add_argument('-v', '--verbose', help="Prints info about uploaded or downloaded Resources", action='store_true')
+    argparser.add_argument('-v', '--verbose', help="Prints info about uploaded or downloaded Resources",
+                           action='store_true')
     argparser.add_argument('-d', '--dryrun', help="Does not save any data in meta db or storage", action='store_true')
     argparser.add_argument('--neutral-dryrun', dest='neutral_dryrun', action='store_true',
                            help='ignores any wrapping settings from the currently used storage, but uses the same '
@@ -124,7 +125,8 @@ class ImageSaverApp(object):
     argparser.add_argument('-nrc', '--no-ram-cache', dest='no_ram_cache',
                            help="Do not store Resources in a Cache in RAM. Useful for upload only operations.",
                            action='store_true')
-    argparser.add_argument('-c', '--config', help="Path to the Configuration file. (default: %(default)s)", type=toAbsPath,
+    argparser.add_argument('-c', '--config', help="Path to the Configuration file. (default: %(default)s)",
+                           type=toAbsPath,
                            default=CONF_PATH)
 
     subparsers = argparser.add_subparsers(help='The Action to perform on Target', dest="action")
@@ -433,7 +435,8 @@ class ImageSaverApp(object):
                         try:
                             ram_cache_size = parser.getint('isl', 'ram_cache_size')
                         except ValueError:
-                            self.argparser.error('Config invalid, Section "isl" option "ram_cache_size" is not an Integer')
+                            self.argparser.error(
+                                'Config invalid, Section "isl" option "ram_cache_size" is not an Integer')
                             exit(1)
                             return
                     else:
@@ -690,9 +693,9 @@ class ImageSaverApp(object):
                                     dest_file_name = dest_file_name
                                 self._upload_file(dest_file_name, globbed_item, src_file_name, src_fs, src_file,
                                                   self.is_fs, '(' + str(item_index + 1) + ' of ' + str(
-                            len(globbed_items)) + ') ')
+                                        len(globbed_items)) + ') ')
                     except PermissionError as e:
-                        print("Unable to open file,", str(e),file=sys.stderr)
+                        print("Unable to open file,", str(e), file=sys.stderr)
                 elif os.path.isdir(globbed_item) and not self.namespace.recursive:
                     if self._is_skippable(globbed_item, self.namespace.exclude):
                         if not self.namespace.silent:
@@ -757,7 +760,8 @@ class ImageSaverApp(object):
                                 if not self.namespace.silent:
                                     print('(' + str(item_index + 1) + ' of ' + str(
                                         len(globbed_items)) + ', ' + str(local_file_index + 1) + ' of ' + str(
-                                        len(local_files)) + ') skipping "' + globbed_dest_file_name + '"', file=sys.stderr)
+                                        len(local_files)) + ') skipping "' + globbed_dest_file_name + '"',
+                                          file=sys.stderr)
                                 continue
                             # print(globbed_item, local_file, fs.path.join(globbed_item, local_file))
                             try:
@@ -765,19 +769,21 @@ class ImageSaverApp(object):
                             except (ResourceNotFound, FileExpected) as e:
                                 print('(' + str(item_index + 1) + ' of ' + str(
                                     len(globbed_items)) + ', ' + str(local_file_index + 1) + ' of ' + str(
-                                    len(local_files)) + ') file vanished "' + globbed_dest_file_name + '";', repr(e), file=sys.stderr)
+                                    len(local_files)) + ') file vanished "' + globbed_dest_file_name + '";', repr(e),
+                                      file=sys.stderr)
                                 continue
                             except PermissionDenied as e:
                                 print('(' + str(item_index + 1) + ' of ' + str(
                                     len(globbed_items)) + ', ' + str(local_file_index + 1) + ' of ' + str(
-                                    len(local_files)) + ') permission denied "' + globbed_dest_file_name + '";', repr(e), file=sys.stderr)
+                                    len(local_files)) + ') permission denied "' + globbed_dest_file_name + '";',
+                                      repr(e), file=sys.stderr)
                                 continue
 
                             try:
                                 self._upload_file(local_file, globbed_dest_file_name, local_file, src_fs, src_file,
                                                   dst_fs, '(' + str(item_index + 1) + ' of ' + str(
-                len(globbed_items)) + ', ' + str(local_file_index + 1) + ' of ' + str(
-                len(local_files)) + ') ')
+                                        len(globbed_items)) + ', ' + str(local_file_index + 1) + ' of ' + str(
+                                        len(local_files)) + ') ')
                             finally:
                                 src_file.close()
 
@@ -819,19 +825,20 @@ class ImageSaverApp(object):
 
             self._set_frag_cache_on_upload_printer()
 
-    def _upload_file(self, dest_file_name, globbed_src_file_name, src_file_name, src_fs, src_file, dst_fs, print_prefix=''):
+    def _upload_file(self, dest_file_name, globbed_src_file_name, src_file_name, src_fs, src_file, dst_fs,
+                     print_prefix=''):
         # type: (str, str, str, FS, IO, FS, str) -> None
         dest_file_exists = dst_fs.exists(dest_file_name)
         if dest_file_exists and not self.namespace.overwrite:
             if not self.namespace.silent:
-                print(print_prefix+'already uploaded "' + globbed_src_file_name + '"', file=sys.stderr)
+                print(print_prefix + 'already uploaded "' + globbed_src_file_name + '"', file=sys.stderr)
             return
         elif dest_file_exists and self.namespace.overwrite and self.namespace.update:
             src_hash = src_fs.hash(src_file_name, 'sha256')
             dst_hash = dst_fs.hash(dest_file_name, 'sha256')
             if src_hash == dst_hash:
                 if not self.namespace.silent:
-                    print(print_prefix+'already uploaded "' + globbed_src_file_name + '"', file=sys.stderr)
+                    print(print_prefix + 'already uploaded "' + globbed_src_file_name + '"', file=sys.stderr)
                 return
         elif dest_file_exists and self.namespace.overwrite and not self.namespace.update:
             pass
@@ -841,7 +848,7 @@ class ImageSaverApp(object):
         else:
             pass
         if not self.namespace.silent:
-            print(print_prefix+'uploading "' + globbed_src_file_name + '"', file=sys.stderr)
+            print(print_prefix + 'uploading "' + globbed_src_file_name + '"', file=sys.stderr)
 
         total_size = get_size_of_stream(cast(BinaryIO, src_file))
         with TqdmUpTo(unit='Bytes', total=total_size,
@@ -914,7 +921,7 @@ class ImageSaverApp(object):
                         continue
                     for mix_item in mix_items:
                         if mix_items_patterns[mix_item](compound.compound_name):
-                        # if fnmatch.fnmatch(compound.compound_name, mix_item):
+                            # if fnmatch.fnmatch(compound.compound_name, mix_item):
                             if compound.compound_type == Compound.DIR_TYPE:
                                 downloadable_dirs.append(compound.compound_name)
                             else:
@@ -1597,32 +1604,7 @@ class ImageSaverApp(object):
 
 
 if __name__ == "__main__":
-    # debug import to find this damn memory leak
-    from pympler import tracker, asizeof
-    tr = tracker.SummaryTracker()
-
     app = ImageSaverApp()
     app.setup()
     app.run()
     app.teardown()
-
-    tr.print_diff()
-
-    app.storage._storage._storage._cache_meta.sessionmaker = None
-    app.meta.sessionmaker = None
-
-    s = asizeof.asizeof(app.meta)
-    print('size of app.meta', s, humanfriendly.format_size(s))
-    s = asizeof.asizeof(app.storage)
-    print('size of app.storage', s, humanfriendly.format_size(s))
-    s = asizeof.asizeof(app.save_service)
-    print('size of app.save_service', s, humanfriendly.format_size(s))
-    s = asizeof.asizeof(app.save_service.reserved_compounds)
-    print('size of app.save_service.reserved_compounds', s, humanfriendly.format_size(s))
-    s = asizeof.asizeof(app.save_service.reserved_fragments)
-    print('size of app.save_service.reserved_fragments', s, humanfriendly.format_size(s))
-    s = asizeof.asizeof(app.save_service.reserved_resources)
-    print('size of app.save_service.reserved_resources', s, humanfriendly.format_size(s))
-    app.save_service.fragment_cache.meta = None
-    s = asizeof.asizeof(app.save_service.fragment_cache)
-    print('size of app.save_service.fragment_cache', s, humanfriendly.format_size(s))

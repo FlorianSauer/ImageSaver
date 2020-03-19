@@ -1,4 +1,3 @@
-pympler
 pyftpdlib
 binpacking
 humanfriendly
