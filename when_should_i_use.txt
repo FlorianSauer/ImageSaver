@@ -1,0 +1,13 @@
+When should I use . . .
+
+clean -df
+You should use the defragment option when you do not want to query your storage more than necessary during
+component downloads. When the content of a Compound changes multiple times, the new fragments will be added to
+new Resources. This means that the querying of a compounds payload has to extract its fragments from multiple different
+Resources. The worst case would be that each needed fragment is in a different Resource.
+
+upload -ow -u
+You should use this options when you repeatedly upload the same folder. this will only upload files, which do either not
+exist on the remote side or were changed. in order to do this, a sha256 checksum is generated from each local file.
+this means, that some files will be read two times; the first time to generate the checksum, and the second time
+to read the file and generate fragments from it.
