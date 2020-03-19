@@ -1,9 +1,10 @@
 # ImageSaver
 
-ImageSaver is a Tool for saving binary Data on Services, which normally do not support this kind of data.
+ImageSaver is a Tool/Library for saving binary Data on Services, which normally do not support saving this kind of data.
 
-ImageSaver was developed to upload any Files to services like Flickr or Google Photos, which provide 1TB (Flickr) or unlimited (Google Photos) Storage Space.
+ImageSaver was developed to upload any Files (Music, Documents, Movies, Images, ...) to services like Flickr or Google Photos, which provide 1TB (Flickr) or unlimited (Google Photos) Storage Space.
 
+WARNING: This currently is a personal hobby project, so its neither 'finished' nor 'bug-free' or 'stable'. But it currently works without any major flaws. If you want to contribute just let me know :)
 
 ### When is a Service a supported Service?
 
@@ -26,6 +27,7 @@ Basic requirements for a Storage Service are
 ImageSaver tries its best to work with streams, however at some point some data has to be stored in caches to reduce the usage of the target Service.
 
 If you pass a big text file to ImageSaver it will treat your file as a Compound, which consists of Fragments, which are stored in Resources.
+Basically ImageSaver is a Key-Value storage.
 
 ##### Basic Layers overview:
 1. Compound Layer
