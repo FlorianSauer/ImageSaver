@@ -666,8 +666,8 @@ class ImageSaver(object):
         Does not check resource data, only resource names
         """
         with self.meta:
-            storage_set = set(self.storage.listResourceNames())
             meta_set = set(self.meta.getAllResourceNames())
+            storage_set = set(self.storage.listResourceNames())
             # at least cache_meta must be in storage set, if storage set is bigger, this only means that there is garbage/unknown
             # files stored in storage
             if not meta_set.issubset(storage_set):
