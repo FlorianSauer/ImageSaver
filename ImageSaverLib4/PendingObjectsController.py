@@ -1,7 +1,7 @@
 from threading import RLock
 from typing import List, Dict, Tuple, Optional
 
-from ImageSaverLib4.MetaDB.Types.Compound import CompoundName
+from ImageSaverLib4.MetaDB.Types.Compound import CompoundName, CompoundHash
 from ImageSaverLib4.MetaDB.Types.CompoundFragmentMapping import SequenceIndex
 from ImageSaverLib4.MetaDB.Types.Fragment import FragmentHash
 from .MetaDB.Types.Compound import Compound
@@ -84,6 +84,14 @@ class PendingObjectsController(object):
         with self._mutex:
             for c in self.compound_fragment_sequence_map.keys():
                 if c.compound_name == name:
+                    return c
+            return None
+
+    def getPendingCompoundWithHash(self, compound_hash):
+        # type: (CompoundHash) -> Optional[Compound]
+        with self._mutex:
+            for c in self.compound_fragment_sequence_map.keys():
+                if c.compound_hash == compound_hash:
                     return c
             return None
 
