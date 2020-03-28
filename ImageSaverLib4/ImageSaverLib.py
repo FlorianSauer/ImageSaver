@@ -705,6 +705,29 @@ class ImageSaver(object):
                     "Meta is missing one or multiple Fragments where Compounds are linked to")
         return True
 
+    def repairMetaConsistencyFragmentlessCompounds(self):
+        """
+        tries to repair compounds with missing fragments by seaching for compounds with the same CompoundHash
+        returns the number of repaired compounds and the number of unrepairable compounds
+        """
+        with self.meta:
+            fragmentless_compounds = self.meta.getAllCompoundsWithNoFragmentLink()
+            repaired = 0
+            unrepairable = 0
+            for compound in fragmentless_compounds:
+                print('attempting repair for', compound.compound_name)
+                try:
+                    consistent_compound = self.meta.getCompoundByHashWithFragmentLinks(compound.compound_hash)
+                except NotExistingException:
+                    print('... no copyable compound found')
+                    unrepairable += 1
+                    continue
+                else:
+                    print('... copying from', consistent_compound.compound_name)
+                    self.copyCompound(consistent_compound.compound_name, compound.compound_name)
+                    repaired += 1
+        return repaired, unrepairable
+
     def checkStorageConsistencyByStorageContent(self, progressreporter=None):
         # type: (Optional[TqdmUpTo]) -> None
         """
@@ -895,6 +918,13 @@ class ImageSaver(object):
             return compound
         return self.meta.getCompoundByName(CompoundName(name))
 
+    def getCompoundWithHash(self, compound_hash):
+        # type: (bytes) -> Compound
+        compound = self.pending_objects.getPendingCompoundWithHash(CompoundHash(compound_hash))
+        if compound:
+            return compound
+        return self.meta.getCompoundByHash(CompoundHash(compound_hash))
+
     def getUnneededFragmentCount(self):
         # type: () -> int
         return len(self.meta.getUnneededFragments())
@@ -904,3 +934,7 @@ class ImageSaver(object):
         gen = self.meta.getUnneededFragments()
         gen = gen.add_layer(lambda _gen: (f.fragment_size for f in _gen))
         return sum(gen)
+
+    def getAllCompoundsWithNoFragmentLink(self):
+        # type: () -> SizedGenerator[Compound]
+        return self.meta.getAllCompoundsWithNoFragmentLink()

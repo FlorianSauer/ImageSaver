@@ -31,6 +31,11 @@ class MetaDBInterface(ABC):
         pass
 
     @abstractmethod
+    def getCompoundByHash(self, compound_hash):
+        # type: (CompoundHash) -> Compound
+        pass
+
+    @abstractmethod
     def makeFragment(self, fragment_hash, fragment_size, fragment_payload_size):
         # type: (FragmentHash, FragmentSize, FragmentPayloadSize) -> Fragment
         pass
@@ -86,6 +91,11 @@ class MetaDBInterface(ABC):
     @abstractmethod
     def hasCompoundWithName(self, name):
         # type: (CompoundName) -> bool
+        pass
+
+    @abstractmethod
+    def hasCompoundWithHash(self, compound_hash):
+        # type: (CompoundHash) -> bool
         pass
 
     # @abstractmethod
@@ -393,6 +403,11 @@ class MetaDBInterface(ABC):
         """
         excludes compounds with size 0, because those compounds do not have any fragment naturally
         """
+        pass
+
+    @abstractmethod
+    def getCompoundByHashWithFragmentLinks(self, compound_hash):
+        # type: (CompoundHash) -> Compound
         pass
 
     # @abstractmethod

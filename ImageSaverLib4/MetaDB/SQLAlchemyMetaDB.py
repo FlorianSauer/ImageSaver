@@ -44,6 +44,10 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
         with self.session_scope() as session:  # type: Session
             return self._get(session, Compound, Compound.compound_name == compound_name)
 
+    def getCompoundByHash(self, compound_hash):
+        with self.session_scope() as session:  # type: Session
+            return self._get(session, Compound, Compound.compound_hash == compound_hash)
+
     def makeFragment(self, fragment_hash, fragment_size, fragment_payload_size):
         with self.session_scope() as session:  # type: Session
             return self._get_or_create(session, Fragment, None, fragment_hash=fragment_hash,
@@ -121,6 +125,14 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
         with self.session_scope() as session:  # type: Session
             try:
                 self._get(session, Compound, Compound.compound_name == name)
+                return True
+            except NotExistingException:
+                return False
+
+    def hasCompoundWithHash(self, compound_hash):
+        with self.session_scope() as session:  # type: Session
+            try:
+                self._get(session, Compound, Compound.compound_hash == compound_hash)
                 return True
             except NotExistingException:
                 return False
@@ -708,6 +720,18 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             query = query.filter(CompoundFragmentMapping.payload_fragment_id.is_(None))
             return self._exposable_lengen_query(exposed_session, query, Compound.compound_id)
 
+    def getCompoundByHashWithFragmentLinks(self, compound_hash):
+        with self.session_scope() as session:  # type: Session
+            query = session.query(Compound)  # type: Query
+            query = query.filter(Compound.compound_hash == compound_hash)
+
+            query = query.outerjoin(CompoundFragmentMapping,
+                                    CompoundFragmentMapping.compound_id == Compound.compound_id)
+            query = query.filter(Compound.compound_size > 0)
+            query = query.filter(not_(CompoundFragmentMapping.payload_fragment_id.is_(None)))
+            c = query.first()
+            if not c:
+                raise NotExistingException
     # def hasPendingFragmentWithHash(self, fragment_hash):
     #     with self.session_scope():
     #         try:

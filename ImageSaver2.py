@@ -37,6 +37,7 @@ class Actions(object):
     clean = 'clean'
     check = 'check'
     ftp = 'ftp'
+    repair = 'repair'
 
 
 def checkIsPercentage(s):
@@ -149,6 +150,8 @@ class ImageSaverApp(object):
                                          allow_abbrev=False)
     check_parser = subparsers.add_parser(Actions.check, help="Perform integrity checks on Meta-DB and Target",
                                          allow_abbrev=False)
+    repair_parser = subparsers.add_parser(Actions.repair, help="Perform repair operations on Meta-DB and Target",
+                                          allow_abbrev=False)
 
     upload_parser.add_argument('item', action='append', help="Add the given File or Directory to the Target."
                                , nargs='+', default=[])
@@ -538,6 +541,8 @@ class ImageSaverApp(object):
             self.runCheck()
         elif self.namespace.action == Actions.ftp:
             self.runFTP()
+        elif self.namespace.action == Actions.repair:
+            self.runRepair()
         else:
             self.argparser.print_help()
 
@@ -1438,6 +1443,21 @@ class ImageSaverApp(object):
         # for mix_item in globbed_items:
         #     self.save_service.deleteCompound(mix_item)
         #     print("removed", mix_item)
+
+    def runRepair(self):
+        repaired, unrepairable = self.save_service.repairMetaConsistencyFragmentlessCompounds()
+        if unrepairable:
+            fragmentless_compounds = list(self.save_service.getAllCompoundsWithNoFragmentLink())
+            print("There are unrepairable Compounds without linked Fragments.")
+            for lost_compound in fragmentless_compounds:
+                print(lost_compound.compound_type+':', lost_compound.compound_name)
+            print("These Compounds are currently lost and non-recoverable by other known compounds")
+            print("Do you want to delete these Compounds?")
+            answer = input("Enter 'Y' or 'Yes' to delete unrecoverable Compounds: ")
+            if answer.lower() in ('y', 'yes'):
+                for lost_compound in fragmentless_compounds:
+                    print('deleting', lost_compound.compound_name)
+                    self.save_service.deleteCompound(lost_compound.compound_name)
 
     def runFTP(self):
         from ImageSaverLib4.FTPServer import serve_fs
