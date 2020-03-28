@@ -10,7 +10,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 from ImageSaverLib4.Helpers import chunkiterable_gen
-from ImageSaverLib4.Storage.Errors import UploadError, DownloadError, StorageError
+from ImageSaverLib4.Storage.Errors import UploadError, DownloadError, StorageError, NotFoundError
 from .resources.Album import Album
 from .resources.MediaItem import MediaItem
 from .resources.NewMediaItemResult import NewMediaItemResult
@@ -228,8 +228,8 @@ class ApiCaller(object):
             print("getMediaItemByID get")
         response = self.session.get('https://photoslibrary.googleapis.com/v1/mediaItems/' + mediaitem_id)
         if response.status_code != 200:
-            print(response.json())
-            raise StorageError("unable to download media, response code was not 200: " + str(response.status_code)+"; response: "
+            # print(response.json())
+            raise NotFoundError("unable to download media, response code was not 200: " + str(response.status_code)+"; response: "
                                +str(response.raw))
         return MediaItem(response.json())
 
@@ -242,7 +242,7 @@ class ApiCaller(object):
         response = self.session.get('https://photoslibrary.googleapis.com/v1/albums/' + album_id)
         if response.status_code != 200:
             print(response.json())
-            raise StorageError("unable to download album_id, response code was not 200: " + str(response.status_code))
+            raise NotFoundError("unable to download album_id, response code was not 200: " + str(response.status_code))
         return Album(response.json())
 
     def downloadMediaItem(self, media_item):

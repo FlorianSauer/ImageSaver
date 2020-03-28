@@ -6,6 +6,7 @@ from typing import Optional, Dict
 from ImageSaverLib4.Encapsulation.Wrappers.Types import MinimumSizeWrapper, PNG3DWrapper
 from ImageSaverLib4.MetaDB.Types.Resource import ResourceSize
 from .api.resources.Album import Album
+from ..Errors import NotFoundError
 from ..StorageBuilder import StorageBuilderInterface, str_to_bool, str_to_bytesize
 from ..StorageInterface import AbstractSizableStorageInterface, StorageSize
 
@@ -160,11 +161,19 @@ class GooglePhotosStorage(AbstractSizableStorageInterface, StorageBuilderInterfa
         self.resetCurrentSize()
         src_album_id, mediaitem_id = self.parse_resource_name(resource_name)
         # print('deleteResource', src_album_id, mediaitem_id)
-        src_album = self.api.getAlbumByID(src_album_id)
         trash_album = self.createTrashAlbum()
-        media_item = self.api.getMediaItemByID(mediaitem_id)
-        self.api.addMediaItemsToAlbum(trash_album, [media_item, ])
-        self.api.removeMediaItemsFromAlbum(src_album, [media_item, ])
+        try:
+            media_item = self.api.getMediaItemByID(mediaitem_id)
+        except NotFoundError:
+            return
+        else:
+            self.api.addMediaItemsToAlbum(trash_album, [media_item, ])
+        try:
+            src_album = self.api.getAlbumByID(src_album_id)
+        except NotFoundError:
+            pass
+        else:
+            self.api.removeMediaItemsFromAlbum(src_album, [media_item, ])
 
     def listResourceNames(self):
         id_list = []
