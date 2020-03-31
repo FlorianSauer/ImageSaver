@@ -1,9 +1,9 @@
 import hashlib
-import threading
 from threading import RLock
 from typing import List, Tuple, Dict, Optional, Iterable, Union, Set, Callable
 
 import binpacking
+import humanfriendly
 
 from ImageSaverLib4.Encapsulation import encapsulate, decapsulate, WrappingType, CompressionType
 from ImageSaverLib4.Encapsulation.Compressors.AutoCompressor import AutoCompressor
@@ -257,17 +257,22 @@ class FragmentCache(object):
         with self._mutex:
             if self._in_context > 0 and not force:
                 if self.debug:
-                    print("cannot flush manually inside a context!", threading.current_thread().name, 'stacked context', self._in_context)
+                    pass
+                    # print("cannot flush manually inside a context!", threading.current_thread().name, 'stacked context', self._in_context)
             # if self.cache_total_fragmentsize > self.resource_size or (
             #         self.cache_total_fragmentsize / self.resource_size) >= self.resource_minimum_filllevel or force:
             elif self.cache_total_fragmentsize >= self.resource_size or force:
                 self._flush(totalflush=True)
             # region add compounds to meta which are 'finished' based on PendingObjectsControlelr
-            for compound, fragment_payload_index in self.pending_objects.popNonPendingFragmentSequences().items():
-                assert compound.compound_id is None
-                assert all((f.fragment_id is None for f, _ in fragment_payload_index))
-                # print('persisiting', compound.compound_name)
-                self.meta.addOverwriteCompoundAndMapFragments(compound, fragment_payload_index)
+            non_pending_fragment_sequences = self.pending_objects.popNonPendingFragmentSequences()
+            if non_pending_fragment_sequences:
+                if self.debug:
+                    print("persisting", len(non_pending_fragment_sequences), "compounds with a total of", sum((len(fpi) for fpi in non_pending_fragment_sequences.values())), "fragment mappings in meta")
+                for compound, fragment_payload_index in non_pending_fragment_sequences.items():
+                    assert compound.compound_id is None
+                    assert all((f.fragment_id is None for f, _ in fragment_payload_index))
+                    # print('persisiting', compound.compound_name)
+                    self.meta.addOverwriteCompoundAndMapFragments(compound, fragment_payload_index)
             # endregion
 
     def _flush(self, totalflush=False):
@@ -278,23 +283,23 @@ class FragmentCache(object):
                 if self.debug:
                     print("cache is empty, skipping flushing, totalflush="+str(totalflush))
                 return
-            if self.debug:
-                print("mid flushing possible, totalflush="+str(totalflush))
+            # if self.debug:
+            #     print("mid flushing possible, totalflush="+str(totalflush))
                 # print(hash(tuple(self.fragment_cache.keys())))
                 # print("max fragment id", max((f.fragment_id for _, f in self.fragment_cache.values())))
                 # traceback.print_stack()
             if self.policy == self.POLICY_PASS:
-                if self.debug:
-                    print("with policy pass")
+                # if self.debug:
+                #     print("with policy pass")
                 self._flush_percentage_filled()
             elif self.policy == self.POLICY_FILL:
-                if self.debug:
-                    print("with policy fill")
+                # if self.debug:
+                #     print("with policy fill")
                 self._flush_percentage_filled()
                 self._flush_resource_appending()
             elif self.policy == self.POLICY_FILL_ALWAYS:
-                if self.debug:
-                    print("with policy fill_always")
+                # if self.debug:
+                #     print("with policy fill_always")
                 self._flush_resource_appending()
             else:
                 raise NotImplementedError
@@ -302,30 +307,35 @@ class FragmentCache(object):
             # after emptying out the cache (few fragments might remain, cannot build full resource from it),
             # check if we should totalflush the cache
             if totalflush:
-                if self.debug:
-                    print("totalflush flushing")
+                # if self.debug:
+                #     print("totalflush flushing")
                 # depending on policy, simply upload remaining or fill other resources.
                 if self.policy == self.POLICY_PASS:
-                    if self.debug:
-                        print("with pass")
+                    # if self.debug:
+                    #     print("with pass")
                     # policy says, to simply upload remaining blocks as one resource, ignore storage wasting
                     self._flush_percentage_filled(empty=True)
                 elif self.policy == self.POLICY_FILL:
-                    if self.debug:
-                        print("with policy fill")
+                    # if self.debug:
+                    #     print("with policy fill")
                     self._flush_percentage_filled()
                     self._flush_resource_appending(empty=True)
                 elif self.policy == self.POLICY_FILL_ALWAYS:
-                    if self.debug:
-                        print("with policy fill_always")
+                    # if self.debug:
+                    #     print("with policy fill_always")
                     self._flush_resource_appending(empty=True)
                 assert len(self.fragment_cache) == 0, repr(len(self.fragment_cache)) + ' ' + repr(
                     {h: f for h, (_, f) in self.fragment_cache.items()})
             # region add compounds to meta which are 'finished' based on PendingObjectsControlelr
-            for compound, fragment_payload_index in self.pending_objects.popNonPendingFragmentSequences().items():
-                assert compound.compound_id is None
-                assert all((f.fragment_id is None for f, _ in fragment_payload_index))
-                self.meta.addOverwriteCompoundAndMapFragments(compound, fragment_payload_index)
+            non_pending_fragment_sequences = self.pending_objects.popNonPendingFragmentSequences()
+            if non_pending_fragment_sequences:
+                if self.debug:
+                    print("persisting", len(non_pending_fragment_sequences), "compounds with a total of",
+                          sum((len(fpi) for fpi in non_pending_fragment_sequences.values())), "fragment mappings in meta")
+                for compound, fragment_payload_index in non_pending_fragment_sequences.items():
+                    assert compound.compound_id is None
+                    assert all((f.fragment_id is None for f, _ in fragment_payload_index))
+                    self.meta.addOverwriteCompoundAndMapFragments(compound, fragment_payload_index)
             # endregion
 
     def _upload(self, fragments_data, update=None, fragments_count=None):
@@ -361,7 +371,7 @@ class FragmentCache(object):
                     self._on_upload(resource_size, fragments_count)
                 resource_name = self.storage.saveResource(resource_data, resource_hash, resource_size)
                 if self.debug:
-                    print("created resource with name:", resource_name)
+                    print("created resource ("+humanfriendly.format_size(resource_size)+") with name:", resource_name)
             resource = self.meta.makeResource(resource_name, resource_size, resource_payloadsize, resource_hash,
                                               self.resource_wrap_type,
                                               self.resource_compress_type)
@@ -442,10 +452,15 @@ class FragmentCache(object):
                 self.cache_total_fragmentsize -= fragment.fragment_size
             # endregion
             # region add compounds to meta which are 'finished' based on PendingObjectsControlelr
-            for compound, fragment_payload_index in self.pending_objects.popNonPendingFragmentSequences().items():
-                assert compound.compound_id is None
-                assert all((f.fragment_id is None for f, _ in fragment_payload_index))
-                self.meta.addOverwriteCompoundAndMapFragments(compound, fragment_payload_index)
+            non_pending_fragment_sequences = self.pending_objects.popNonPendingFragmentSequences()
+            if non_pending_fragment_sequences:
+                if self.debug:
+                    print("persisting", len(non_pending_fragment_sequences), "compounds with a total of",
+                          sum((len(fpi) for fpi in non_pending_fragment_sequences.values())), "fragment mappings in meta")
+                for compound, fragment_payload_index in non_pending_fragment_sequences.items():
+                    assert compound.compound_id is None
+                    assert all((f.fragment_id is None for f, _ in fragment_payload_index))
+                    self.meta.addOverwriteCompoundAndMapFragments(compound, fragment_payload_index)
             # endregion
 
             if self.debug:
