@@ -244,7 +244,8 @@ class ImageSaverApp(object):
                               help="Removes 'Fragment-Holes' in Resources; optimizes Space usage of resources by "
                                    "removing all bytes which are not indexed. Optionally a percentage Value can be "
                                    "passed, so only Resources with equals or greater procentual large "
-                                   "'Fragment-Holes' get removed.", default=None, const=0.0, nargs='?',
+                                   "'Fragment-Holes' get removed. Example: '-os 10' to optimize Resources with 10%% "
+                                   "Fragment-Holes", default=None, const=0.0, nargs='?',
                               type=checkIsPercentage)
     # clean_parser.add_argument('-os', '--optimize-space', action='store_true', dest='optimize_space',
     #                           help="Removes 'Fragment-Holes' in Resources; optimizes Space usage of resources by "
@@ -334,7 +335,7 @@ class ImageSaverApp(object):
             # self._save_service.fragment_cache.resource_compress_type = makeCompressingType(PassThroughCompressor)
             # self.save_service.changeFragmentSize(tobytes(1, 'MB'))
             # self.save_service.changeFragmentSize((10, 'KB'))
-            self._save_service.debug_enabled = self.namespace.debug
+            self._save_service.fragment_cache.debug = self.namespace.debug
             # self._save_service.wrap_type = makeWrappingType(PassThroughWrapper)
             # self._save_service.compress_type = makeCompressingType(ZLibCompressor)  # 31884582
             # if self.namespace.dryrun:
@@ -797,7 +798,9 @@ class ImageSaverApp(object):
 
                         if self.namespace.sync:
                             self.save_service.flush()
-
+                            if not self.namespace.silent:
+                                print('syncing directories . . .')
+                                print('. . . building file set . . .')
                             remote_files = set(dst_fs.walk.files())
                             # print('chars remote files', sum((len(i) for i in remote_files)))
 
@@ -811,6 +814,8 @@ class ImageSaverApp(object):
                                     for deletable_file in progressreporter:
                                         dst_fs.remove(deletable_file)
                                         progressreporter.write('removed "' + deletable_file + '"')
+                            if not self.namespace.silent:
+                                print('. . . building directory set . . .')
                             remote_dirs = set(dst_fs.walk.dirs())
                             # print('chars remote dirs', sum((len(i) for i in remote_dirs)))
                             deletable_dirs = remote_dirs.difference(local_dirs)
@@ -1446,9 +1451,13 @@ class ImageSaverApp(object):
 
     def runRepair(self):
         repaired, unrepairable = self.save_service.repairMetaConsistencyFragmentlessCompounds()
+        if not repaired and not unrepairable:
+            print("no fragmentless Compounds found, all ok")
+            return
+        print("Repaired", repaired, "Compounds")
         if unrepairable:
             fragmentless_compounds = list(self.save_service.getAllCompoundsWithNoFragmentLink())
-            print("There are unrepairable Compounds without linked Fragments.")
+            print("There are ", unrepairable ,"unrepairable Compounds without linked Fragments.")
             for lost_compound in fragmentless_compounds:
                 print(lost_compound.compound_type+':', lost_compound.compound_name)
             print("These Compounds are currently lost and non-recoverable by other known compounds")
@@ -1458,6 +1467,7 @@ class ImageSaverApp(object):
                 for lost_compound in fragmentless_compounds:
                     print('deleting', lost_compound.compound_name)
                     self.save_service.deleteCompound(lost_compound.compound_name)
+
 
     def runFTP(self):
         from ImageSaverLib4.FTPServer import serve_fs
