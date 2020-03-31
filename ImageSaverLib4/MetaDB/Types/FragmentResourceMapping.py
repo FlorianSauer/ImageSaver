@@ -15,9 +15,9 @@ class FragmentResourceMapping(Base, ColumnPrinterMixin):
     fragment_resource_mapping_id = Column(Integer, Sequence('fragment_resource_mapping_id_seq'), primary_key=True, unique=True)  # type: FragmentResourceMappingID
 
     fragment_id = Column(Integer, ForeignKey('fragments.fragment_id', ondelete='CASCADE'),
-                         nullable=False, unique=True)  # type: FragmentID
+                         nullable=False, unique=True, index=True)  # type: FragmentID
     resource_id = Column(Integer, ForeignKey('resources.resource_id', ondelete='CASCADE'),
-                         nullable=False, unique=False)  # type: ResourceID
+                         nullable=False, unique=False, index=True)  # type: ResourceID
     fragment_offset = Column(BigInteger)  # type: FragmentOffset
 
     __table_args__ = (UniqueConstraint('fragment_id', 'resource_id'), )

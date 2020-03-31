@@ -16,9 +16,9 @@ class CompoundFragmentMapping(Base, ColumnPrinterMixin):
     payload_fragment_id = Column(Integer, Sequence('compound_fragment_mapping_id_seq'), primary_key=True, unique=True,
                                  nullable=False)  # type: CompoundFragmentMappingID
     compound_id = Column(Integer, ForeignKey('compounds.compound_id', ondelete='CASCADE'),
-                         nullable=False)  # type: CompoundID
+                         nullable=False, index=True)  # type: CompoundID
     fragment_id = Column(Integer, ForeignKey('fragments.fragment_id', ondelete='CASCADE'),
-                         nullable=False)  # type: FragmentID
+                         nullable=False, index=True)  # type: FragmentID
     sequence_index = Column(Integer, nullable=False)  # type: SequenceIndex
     __table_args__ = (UniqueConstraint('compound_id', 'sequence_index'),)
 

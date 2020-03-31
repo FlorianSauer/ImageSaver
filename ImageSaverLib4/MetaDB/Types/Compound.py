@@ -21,7 +21,7 @@ class Compound(Base, ColumnPrinterMixin):
     DIR_TYPE = 'Dir'
 
     __tablename__ = 'compounds'
-    compound_id = Column(Integer, Sequence('compound_id_seq'), primary_key=True, unique=True)  # type: CompoundID
+    compound_id = Column(Integer, Sequence('compound_id_seq'), primary_key=True, unique=True, index=True)  # type: CompoundID
     compound_name = Column(Text, unique=True, index=True)  # type: CompoundName
     compound_type = Column(String(255))  # type: CompoundType
     compound_hash = Column(LargeBinary(64))  # type: CompoundHash

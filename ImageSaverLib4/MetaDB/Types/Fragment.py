@@ -13,7 +13,7 @@ FragmentPayloadSize = NewType('FragmentPayloadSize', int)
 
 class Fragment(Base, ColumnPrinterMixin):
     __tablename__ = 'fragments'
-    fragment_id = Column(Integer, Sequence('fragment_id_seq'), primary_key=True, unique=True)  # type: FragmentID
+    fragment_id = Column(Integer, Sequence('fragment_id_seq'), primary_key=True, unique=True, index=True)  # type: FragmentID
     fragment_hash = Column(LargeBinary(64), unique=True, index=True)  # type: FragmentHash
     fragment_size = Column(BigInteger)  # type: FragmentSize
     fragment_payload_size = Column(BigInteger)  # type: FragmentPayloadSize
