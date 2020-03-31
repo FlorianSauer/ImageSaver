@@ -420,7 +420,7 @@ class ImageSaver(object):
                 with ExclusiveMassReserver(self.reserved_fragments,  # values_gen=unreferenced_fragment_hashes,
                                            blocking=blocking, timeout=timeout) as reserver:
                     # print("pre loop")
-                    for chunk_index, fragments_chunk in enumerate(chunkiterable_gen(unreferenced_fragments, 10)):
+                    for chunk_index, fragments_chunk in enumerate(chunkiterable_gen(unreferenced_fragments, 500)):
                         fragments_chunk_len = len(fragments_chunk)
                         # for fragment in (f for f in fragments_chunk if f):  # filter None values from chunk tuples
                         # print("making fragment list of 10")
