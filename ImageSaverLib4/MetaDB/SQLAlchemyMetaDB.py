@@ -320,7 +320,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             query = query.filter(Compound.compound_name == old_name)  # type: Query
             count = query.count()
             if count < 1:
-                raise NotExistingException('no compound found with name '+old_name)
+                raise NotExistingException('no compound found with name ' + old_name)
             query.update({Compound.compound_name: new_name}, synchronize_session='fetch')
 
     def renameResource(self, old_resource_name, new_resource_name):
@@ -329,7 +329,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             query = query.filter(Resource.resource_name == old_resource_name)
             count = query.count()
             if count < 1:
-                raise NotExistingException('no resource found with name '+old_resource_name)
+                raise NotExistingException('no resource found with name ' + old_resource_name)
             query.update({Resource.resource_name: new_resource_name}, synchronize_session='fetch')
 
     def massRenameResource(self, old_new_resource_name_pairs, skip_unknown=False):
@@ -341,7 +341,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                 if count < 1:
                     if skip_unknown:
                         continue
-                    raise NotExistingException('no resource found with name '+old_resource_name)
+                    raise NotExistingException('no resource found with name ' + old_resource_name)
                 query.update({Resource.resource_name: new_resource_name}, synchronize_session='fetch')
 
     def collectGarbage(self, keep_fragments=False, keep_resources=True):
@@ -429,40 +429,43 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
 
     def getSavedBytesByDuplicateFragments(self):
         with self.session_scope() as session:  # type: Session
-            subquery = session.query(CompoundFragmentMapping.fragment_id,
-                                     func.count(CompoundFragmentMapping.fragment_id).label('fragment_id_count'))
-            subquery = subquery.group_by(CompoundFragmentMapping.fragment_id)  # type: Query
-            subquery = subquery.having(func.count(CompoundFragmentMapping.fragment_id) > 1)
-            subquery = subquery.subquery()
+            subquery_1 = session.query(CompoundFragmentMapping.fragment_id,
+                                       func.count(CompoundFragmentMapping.fragment_id).label('fragment_id_count'))
+            subquery_1 = subquery_1.group_by(CompoundFragmentMapping.fragment_id)  # type: Query
+            subquery_1 = subquery_1.having(func.count(CompoundFragmentMapping.fragment_id) > 1)
+            subquery_1 = subquery_1.subquery()
 
-            query = session.query(Fragment.fragment_size, subquery.c.fragment_id_count)
-            query = query.select_from(subquery)
-            query = query.join(Fragment, Fragment.fragment_id == subquery.c.fragment_id)
-            query = query.order_by(Fragment.fragment_id)
+            subquery_2 = session.query(Fragment.fragment_size, subquery_1.c.fragment_id_count)  # type: Query
+            subquery_2 = subquery_2.select_from(subquery_1)
+            subquery_2 = subquery_2.join(Fragment, Fragment.fragment_id == subquery_1.c.fragment_id)
+            subquery_2 = subquery_2.order_by(Fragment.fragment_id)
 
-            return sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(query) if c > 1))
+            # s = sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(subquery_2) if c > 1))
+            subquery_2 = subquery_2.filter(subquery_1.c.fragment_id_count > 1)
+
+            subquery_2 = subquery_2.subquery()
+            query = session.query(func.sum(subquery_2.c.fragment_size * (subquery_2.c.fragment_id_count - 1)))
+            query = query.select_from(subquery_2)
+            # print(query.one()[0])
+            return query.one()[0]
+            # s2 = sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(subquery_2)))
+            # assert s == s2
+            return sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(subquery_2)))
 
     def getMultipleUsedCompoundsCount(self, compound_type=None):
         with self.session_scope() as session:  # type: Session
-            query = session.query(Compound.compound_hash, func.count(Compound.compound_hash)).group_by(
-                Compound.compound_hash).order_by(Compound.compound_hash)
+            query1 = session.query(Compound.compound_hash, func.count(Compound.compound_hash).label('compound_hash_count'))
+            query1 = query1.group_by(Compound.compound_hash)
+            query1 = query1.order_by(Compound.compound_hash)
             if compound_type:
-                query = query.filter(Compound.compound_type == compound_type)
-            hash_count = self._non_exposable_lengen_query(query)
-            query = session.query(Compound.compound_hash)  # type: Query
-            if compound_type is not None:
-                query = query.filter(Compound.compound_type == compound_type)
-            query = query.distinct()
-            compound_count = query.count()
-            return sum((c for _, c in hash_count)) - compound_count
-            # query = self.session.query(functions.sum(subquery.c.compound_size))  # type: Query
-            #
-            # query = self.session.query(Compound.compound_hash,
-            #                            func.count(Compound.compound_hash)).distinct()  # type: Query
-            # # query = query.filter(Compound.payload_id == Payload.payload_id)
-            # query = query.group_by(Compound.compound_hash)  # type: Query
-            # query = query.having(func.count(Compound.compound_hash) > 1)
-            # return query.count()
+                query1 = query1.filter(Compound.compound_type == compound_type)
+
+            subquery = query1.subquery()
+            query = session.query(func.count(subquery.c.compound_hash), func.sum(subquery.c.compound_hash_count))
+            query = query.select_from(subquery)
+            compound_count2, hash_count2 = query.one()
+
+            return hash_count2-compound_count2
 
     def getSavedBytesByMultipleUsedCompounds(self):
         with self.session_scope() as session:  # type: Session
@@ -477,12 +480,24 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             # query = query.join(Compound, Compound.compound_hash == subquery.c.compound_hash)
             # query = query.group_by(Compound.compound_hash)
             #
-            query = session.query(Compound.compound_hash, Compound.compound_size, func.count(Compound.compound_hash))
-            query = query.group_by(Compound.compound_hash, Compound.compound_size)
-            query = query.having(func.count(Compound.compound_hash) > 1)
+            compound_hash_count_label = func.count(Compound.compound_hash).label('compound_hash_count')
+            subquery = session.query(Compound.compound_hash, Compound.compound_size,
+                                     compound_hash_count_label)  # type: Query
+            subquery = subquery.group_by(Compound.compound_hash, Compound.compound_size)
+            subquery = subquery.having(func.count(Compound.compound_hash) > 1)
+            # s1 = sum(((s * c) - s for h, s, c in self._non_exposable_lengen_query(subquery) if c > 1))
 
-            return sum(((s * c) - s for h, s, c in self._non_exposable_lengen_query(query) if c > 1))
-            # return sum((s * (c - 1) for s, c in query.all() if c > 1))
+            # subquery = subquery.filter(compound_hash_count_label > 1)
+            subquery = subquery.subquery()
+
+            query = session.query(func.sum((subquery.c.compound_size * subquery.c.compound_hash_count)
+                                           - subquery.c.compound_size))
+            query = query.select_from(subquery)
+            query = query.filter(subquery.c.compound_hash_count > 1)
+
+            return query.one()[0]
+            # assert s1 == s2
+            # return s2
 
     def getAllResourceNames(self):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
@@ -732,6 +747,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             c = query.first()
             if not c:
                 raise NotExistingException
+
     # def hasPendingFragmentWithHash(self, fragment_hash):
     #     with self.session_scope():
     #         try:
