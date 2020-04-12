@@ -130,27 +130,29 @@ class ImageSaverApp(object):
                            type=toAbsPath,
                            default=CONF_PATH)
 
-    subparsers = argparser.add_subparsers(help='The Action to perform on Target', dest="action")
-    upload_parser = subparsers.add_parser(Actions.upload, help="Perform upload operations on Target",
+    subparsers = argparser.add_subparsers(#help='Operations ImageSaver can perform',
+                                          dest="action")
+    upload_parser = subparsers.add_parser(Actions.upload, help="Upload Files and Folders.",
                                           allow_abbrev=False)
-    list_parser = subparsers.add_parser(Actions.list, help="Perform list operations on Target", allow_abbrev=False)
-    statistic_parser = subparsers.add_parser(Actions.statistic, help="Perform statistic operations on Target",
+    list_parser = subparsers.add_parser(Actions.list, help="List all uploaded Files and Folders.", allow_abbrev=False)
+    statistic_parser = subparsers.add_parser(Actions.statistic, help="Prints Statistics of the uploaded Files and Folders.",
                                              allow_abbrev=False)
     wipe_parser = subparsers.add_parser(Actions.wipe,
-                                        help="Perform wipe operations on Target. "
-                                             "Deletes all compounds, but keeps fragments and resources.",
+                                        help="Wipes all uploaded Files and Folders. "
+                                             "Deletes all Compounds, but keeps Fragments and Resources.",
                                         allow_abbrev=False)
     ftp_parser = subparsers.add_parser(Actions.ftp, help="Host a FTP-server on the loopback device",
                                        allow_abbrev=False)
-    download_parser = subparsers.add_parser(Actions.download, help="Perform download operations on Target",
+    download_parser = subparsers.add_parser(Actions.download, help="Download uploaded Files and Folders",
                                             allow_abbrev=False)
-    remove_parser = subparsers.add_parser(Actions.remove, help="Perform remove operations on Target",
+    remove_parser = subparsers.add_parser(Actions.remove, help="Removes uploaded Files and Folders.",
                                           allow_abbrev=False)
-    clean_parser = subparsers.add_parser(Actions.clean, help="Perform clean and GC operations on Target",
+    clean_parser = subparsers.add_parser(Actions.clean, help="Removes unneeded Fragments and Resources.",
                                          allow_abbrev=False)
-    check_parser = subparsers.add_parser(Actions.check, help="Perform integrity checks on Meta-DB and Target",
+    check_parser = subparsers.add_parser(Actions.check, help="Checks the integrity of Meta-DB and Target",
                                          allow_abbrev=False)
-    repair_parser = subparsers.add_parser(Actions.repair, help="Perform repair operations on Meta-DB and Target",
+    repair_parser = subparsers.add_parser(Actions.repair, help="Starts repair attempts. "
+                                                               "Optionally removes unrecoverable Compounds.",
                                           allow_abbrev=False)
 
     upload_parser.add_argument('item', action='append', help="Add the given File or Directory to the Target."
@@ -510,6 +512,8 @@ class ImageSaverApp(object):
         # if self.namespace.action in (Actions.statistic,):
         #     # self.save_service.collectGarbage()
         #     self.save_service.checkStorageConsistency()
+        if self.namespace.debug:
+            print(self.namespace)
         if self.namespace.silent and self.namespace.verbose:
             self.argparser.error("Cannot run in silent and verbose mode.")
         if self.namespace.action == Actions.upload:
