@@ -34,8 +34,9 @@ class PendingObjectsController(object):
             if len(reservable_fragments) > 0:
                 self.compound_fragment_map[compound] = reservable_fragments
             self.compound_fragment_sequence_map[compound] = fragment_sequence
-            # else:
-            #     print("addCompound: skipping, no reservable fragments")
+
+    def hasCompoundWithName(self, compound_name):
+        return any((c.compound_name == compound_name for c in self.compound_fragment_sequence_map))
 
     def removeFragment(self, fragment):
         # type: (Fragment) -> None
