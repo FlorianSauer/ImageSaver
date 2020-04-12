@@ -440,17 +440,15 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             subquery_2 = subquery_2.join(Fragment, Fragment.fragment_id == subquery_1.c.fragment_id)
             subquery_2 = subquery_2.order_by(Fragment.fragment_id)
 
-            # s = sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(subquery_2) if c > 1))
             subquery_2 = subquery_2.filter(subquery_1.c.fragment_id_count > 1)
 
             subquery_2 = subquery_2.subquery()
             query = session.query(func.sum(subquery_2.c.fragment_size * (subquery_2.c.fragment_id_count - 1)))
             query = query.select_from(subquery_2)
-            # print(query.one()[0])
-            return query.one()[0]
-            # s2 = sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(subquery_2)))
-            # assert s == s2
-            return sum((s * (c - 1) for s, c in self._non_exposable_lengen_query(subquery_2)))
+            result = query.one()[0]
+            if result is None:
+                return 0
+            return result
 
     def getMultipleUsedCompoundsCount(self, compound_type=None):
         with self.session_scope() as session:  # type: Session
@@ -464,7 +462,8 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             query = session.query(func.count(subquery.c.compound_hash), func.sum(subquery.c.compound_hash_count))
             query = query.select_from(subquery)
             compound_count2, hash_count2 = query.one()
-
+            if hash_count2 is None:
+                hash_count2 = 0
             return hash_count2-compound_count2
 
     def getSavedBytesByMultipleUsedCompounds(self):
@@ -495,7 +494,10 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             query = query.select_from(subquery)
             query = query.filter(subquery.c.compound_hash_count > 1)
 
-            return query.one()[0]
+            result = query.one()[0]
+            if result is None:
+                return 0
+            return result
             # assert s1 == s2
             # return s2
 
