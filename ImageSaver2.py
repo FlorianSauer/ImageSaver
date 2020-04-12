@@ -38,6 +38,7 @@ class Actions(object):
     check = 'check'
     ftp = 'ftp'
     repair = 'repair'
+    profile = 'profile'
 
 
 def checkIsPercentage(s):
@@ -104,8 +105,9 @@ def toAbsPath(s):
 
 
 class ImageSaverApp(object):
+    PROFILES_PATH = '~/.isl/profiles'
+    CONF_PATH = '~/'
     CONF_NAME = '.isl_config.conf'
-    CONF_PATH = '~/' + CONF_NAME
 
     # region parser setup
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, allow_abbrev=False)
@@ -128,14 +130,15 @@ class ImageSaverApp(object):
                            action='store_true')
     argparser.add_argument('-c', '--config', help="Path to the Configuration file. (default: %(default)s)",
                            type=toAbsPath,
-                           default=CONF_PATH)
+                           default=os.path.join(CONF_PATH, CONF_NAME))
 
-    subparsers = argparser.add_subparsers(#help='Operations ImageSaver can perform',
-                                          dest="action")
+    subparsers = argparser.add_subparsers(  # help='Operations ImageSaver can perform',
+        dest="action")
     upload_parser = subparsers.add_parser(Actions.upload, help="Upload Files and Folders.",
                                           allow_abbrev=False)
     list_parser = subparsers.add_parser(Actions.list, help="List all uploaded Files and Folders.", allow_abbrev=False)
-    statistic_parser = subparsers.add_parser(Actions.statistic, help="Prints Statistics of the uploaded Files and Folders.",
+    statistic_parser = subparsers.add_parser(Actions.statistic,
+                                             help="Prints Statistics of the uploaded Files and Folders.",
                                              allow_abbrev=False)
     wipe_parser = subparsers.add_parser(Actions.wipe,
                                         help="Wipes all uploaded Files and Folders. "
@@ -154,6 +157,8 @@ class ImageSaverApp(object):
     repair_parser = subparsers.add_parser(Actions.repair, help="Starts repair attempts. "
                                                                "Optionally removes unrecoverable Compounds.",
                                           allow_abbrev=False)
+    profile_parser = subparsers.add_parser(Actions.profile, help="Switches between profiles.",
+                                           allow_abbrev=False)
 
     upload_parser.add_argument('item', action='append', help="Add the given File or Directory to the Target."
                                , nargs='+', default=[])
@@ -279,6 +284,11 @@ class ImageSaverApp(object):
                             help="Sets the listen address of the FTP Server (default: %(default)s)")
     ftp_parser.add_argument('-p', '--port', default=21, type=int,
                             help="Sets the listen port of the FTP Server (default: %(default)s)")
+    profile_parser.add_argument('-l', '--list', dest='list', action='store_true',
+                                help="list all existing profiles")
+    profile_parser.add_argument('-s', '--switch', dest='switch', help="switch to an existing profile. "
+                                                                      "Overwrites the profile provided with --config")
+
     # endregion
 
     namespace = argparser.parse_args(sys.argv[1:])
@@ -475,18 +485,21 @@ class ImageSaverApp(object):
                 self._meta = meta
             return self._meta
 
+    def _config_file(self, mode='r'):
+        if os.path.exists(self.namespace.config):
+            path = self.namespace.config
+        elif os.path.exists(os.path.join(self.CONF_PATH, self.CONF_NAME)):
+            path = os.path.join(self.CONF_PATH, self.CONF_NAME)
+        else:
+            self.argparser.error('Config is missing!')
+            exit(1)
+            return
+        # print('open', path, mode)
+        return open(path, mode)
+
     def _config_parser(self):
         if not self._config_parser_obj:
-            if os.path.exists(self.namespace.config):
-                path = self.namespace.config
-            elif os.path.exists('./' + self.CONF_NAME):
-                path = './' + self.CONF_NAME
-            else:
-                self.argparser.error('Config is missing!')
-                exit(1)
-                return
-
-            with open(path, 'r') as f:
+            with self._config_file(mode='r') as f:
                 parser = ConfigParser()
                 parser.read_file(f)
                 self._config_parser_obj = parser
@@ -548,6 +561,8 @@ class ImageSaverApp(object):
             self.runFTP()
         elif self.namespace.action == Actions.repair:
             self.runRepair()
+        elif self.namespace.action == Actions.profile:
+            self.runProfile()
         else:
             self.argparser.print_help()
 
@@ -1461,9 +1476,9 @@ class ImageSaverApp(object):
         print("Repaired", repaired, "Compounds")
         if unrepairable:
             fragmentless_compounds = list(self.save_service.getAllCompoundsWithNoFragmentLink())
-            print("There are ", unrepairable ,"unrepairable Compounds without linked Fragments.")
+            print("There are ", unrepairable, "unrepairable Compounds without linked Fragments.")
             for lost_compound in fragmentless_compounds:
-                print(lost_compound.compound_type+':', lost_compound.compound_name)
+                print(lost_compound.compound_type + ':', lost_compound.compound_name)
             print("These Compounds are currently lost and non-recoverable by other known compounds")
             print("Do you want to delete these Compounds?")
             answer = input("Enter 'Y' or 'Yes' to delete unrecoverable Compounds: ")
@@ -1472,6 +1487,36 @@ class ImageSaverApp(object):
                     print('deleting', lost_compound.compound_name)
                     self.save_service.deleteCompound(lost_compound.compound_name)
 
+    def runProfile(self):
+        if self.namespace.list:
+            with OSFS(self.PROFILES_PATH) as profiles_dir:
+                for f in profiles_dir.listdir('/'):
+                    # f = fs.path.splitext(fs.path.basename(f))[0]
+                    print(f)
+        elif self.namespace.switch:
+            with OSFS(self.PROFILES_PATH) as profiles_dir:
+                filenames = profiles_dir.listdir('/')
+                if self.namespace.switch not in filenames:
+                    self.profile_parser.error("Profile '" + str(self.namespace.switch) + "' does not exist in '" + str(
+                        self.PROFILES_PATH) + "'")
+                with profiles_dir.open(self.namespace.switch, mode='rb') as profiles_file:
+                    with self._config_file('wb') as config_file:
+                        config_file.write(profiles_file.read())
+                print("switched to profile:", self.namespace.switch)
+                with self._config_file('rb') as config_file:
+                    config_hash = hashlib.sha256(config_file.read()).hexdigest()
+                orig_hash = profiles_dir.hash(self.namespace.switch, 'sha256')
+                assert orig_hash == config_hash, repr((orig_hash, config_hash))
+        else:
+            with self._config_file('rb') as config_file:
+                config_hash = hashlib.sha256(config_file.read()).hexdigest()
+            with OSFS(self.PROFILES_PATH) as profiles_dir:
+                for f in profiles_dir.listdir('/'):
+                    # print(f, profiles_dir.hash(f, 'sha256'), config_hash)
+                    if profiles_dir.hash(f, 'sha256') == config_hash:
+                        print('currently loaded profile:', f)
+                        return
+                print("unknown profile loaded")
 
     def runFTP(self):
         from ImageSaverLib4.FTPServer import serve_fs
