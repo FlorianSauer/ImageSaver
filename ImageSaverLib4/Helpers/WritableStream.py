@@ -251,7 +251,12 @@ def openWritableCompound(meta, fragment_cache, compound_am, fragment_am, fragmen
             if compound:
                 meta_has_compound = True
             else:
-                meta_has_compound = meta.hasCompoundWithName(name)
+                if pending_objects.hasCompoundWithName(name):
+                    meta_has_compound = True
+                    meta_has_compound_is_pending = True
+                else:
+                    meta_has_compound = meta.hasCompoundWithName(name)
+                    meta_has_compound_is_pending = False
             if compound:
                 fragment_hashes = list(meta.getFragmentHashesNeededForCompound(compound.compound_id))
                 fragment_reserver.reserveAll(*fragment_hashes)
@@ -259,7 +264,10 @@ def openWritableCompound(meta, fragment_cache, compound_am, fragment_am, fragmen
                 raise CompoundAlreadyExistsException(
                     "compound already exists (maybe different payload), not allowed to overwrite")
             elif meta_has_compound and overwrite:
-                compound = meta.getCompoundByName(name)
+                if meta_has_compound_is_pending:
+                    compound = pending_objects.getPendingCompoundWithName(name)
+                else:
+                    compound = meta.getCompoundByName(name)
                 fragment_hashes = list(meta.getFragmentHashesNeededForCompound(compound.compound_id))
                 fragment_reserver.reserveAll(*fragment_hashes)
             else:
