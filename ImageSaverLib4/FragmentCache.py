@@ -209,7 +209,11 @@ class FragmentCache(object):
                     fragment_payload = self.last_downloaded_resource_fragments[fragment.fragment_hash]
                 else:
                     try:
-                        resource, fragment_offset = self.meta.getResourceOffsetForFragment(fragment.fragment_id)
+                        if fragment.fragment_id is None:
+                            fragment_id = self.meta.getFragmentByPayloadHash(fragment.fragment_hash).fragment_id
+                        else:
+                            fragment_id = fragment.fragment_id
+                        resource, fragment_offset = self.meta.getResourceOffsetForFragment(fragment_id)
                     except NotExistingException:
                         raise FragmentMissingException(
                             "No fragment offsets found for Fragment with id " + repr(fragment.fragment_id))
@@ -226,7 +230,11 @@ class FragmentCache(object):
                     fragment_payload = self.last_downloaded_resource_fragments[fragment.fragment_hash]
             else:
                 try:
-                    resource, fragment_offset = self.meta.getResourceOffsetForFragment(fragment.fragment_id)
+                    if fragment.fragment_id is None:
+                        fragment_id = self.meta.getFragmentByPayloadHash(fragment.fragment_hash).fragment_id
+                    else:
+                        fragment_id = fragment.fragment_id
+                    resource, fragment_offset = self.meta.getResourceOffsetForFragment(fragment_id)
                 except NotExistingException:
                     raise FragmentMissingException(
                         "No fragment offsets found for Fragment with id " + repr(fragment.fragment_id))
