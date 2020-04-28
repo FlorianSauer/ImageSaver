@@ -286,6 +286,8 @@ class ImageSaverApp(object):
                             help="Sets the listen port of the FTP Server (default: %(default)s)")
     profile_parser.add_argument('-l', '--list', dest='list', action='store_true',
                                 help="list all existing profiles")
+    profile_parser.add_argument('-p', '--print', dest='print', action='store_true',
+                                help="prints the content of the currently used profile")
     profile_parser.add_argument('-s', '--switch', dest='switch', help="switch to an existing profile. "
                                                                       "Overwrites the profile provided with --config")
 
@@ -1493,6 +1495,12 @@ class ImageSaverApp(object):
                 for f in profiles_dir.listdir('/'):
                     # f = fs.path.splitext(fs.path.basename(f))[0]
                     print(f)
+        elif self.namespace.print:
+            with self._config_file('r') as f:
+                profile_text = f.read()
+            if not profile_text.endswith('\n'):
+                profile_text += os.linesep
+            print(profile_text)
         elif self.namespace.switch:
             with OSFS(self.PROFILES_PATH) as profiles_dir:
                 filenames = profiles_dir.listdir('/')
