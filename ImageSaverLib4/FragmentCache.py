@@ -1,4 +1,6 @@
 import hashlib
+import sys
+from collections import OrderedDict
 from threading import RLock
 from typing import List, Tuple, Dict, Optional, Iterable, Union, Set, Callable
 
@@ -40,7 +42,7 @@ class FragmentCache(object):
     # POLICY_FILL_ALWAYS will mainly append fragments to resources, which results in lots of traffic and garbage
     # collectible resources.
     def __init__(self, meta, storage, expected_fragmentsize, resource_wrap_type, resource_compress_type, resource_size,
-                 pending_objects_controller, auto_wrapper, auto_compresser, resource_minimum_filllevel=0.9, auto_delete_resource=False, debug=False):
+                 pending_objects_controller, auto_wrapper, auto_compresser, resource_minimum_filllevel=0.5, auto_delete_resource=False, debug=False):
         # type: (MetaDBInterface, StorageInterface, int, Union[ResourceWrappingType, WrappingType], Union[ResourceCompressionType, CompressionType], ResourceSize, PendingObjectsController, AutoWrapper, AutoCompressor, float, bool, bool) -> None
         # super().__init__(meta, storage, expected_fragmentsize, resource_wrap_type, resource_compress_type,
         #                  resource_size, pending_objects_controller,
@@ -78,7 +80,7 @@ class FragmentCache(object):
         self.storage = storage
         self.pending_objects = pending_objects_controller
 
-        self.fragment_cache = {}  # type: Dict[FragmentHash, Tuple[bytes, Fragment]]
+        self.fragment_cache = OrderedDict()  # type: OrderedDict[FragmentHash, Tuple[bytes, Fragment]]
         self.cache_total_fragmentsize = 0
         self._in_context = 0
         self.cache_last_downloaded_resource = True
@@ -91,6 +93,7 @@ class FragmentCache(object):
         self._on_upload = None  # type: Optional[Callable[[ResourceSize, int], None]]
         self._on_download = None  # type: Optional[Callable[[ResourceSize, int], None]]
         self.upload_on_exception = False
+        self.resource_packer = ResourcePacker()
 
     def __enter__(self):
         with self._mutex:
@@ -269,8 +272,10 @@ class FragmentCache(object):
                     # print("cannot flush manually inside a context!", threading.current_thread().name, 'stacked context', self._in_context)
             # if self.cache_total_fragmentsize > self.resource_size or (
             #         self.cache_total_fragmentsize / self.resource_size) >= self.resource_minimum_filllevel or force:
-            elif self.cache_total_fragmentsize >= self.resource_size or force:
+            elif force:
                 self._flush(totalflush=True)
+            elif self.cache_total_fragmentsize >= self.resource_size or force:
+                self._flush(totalflush=False)
             # region add compounds to meta which are 'finished' based on PendingObjectsControlelr
             non_pending_fragment_sequences = self.pending_objects.popNonPendingFragmentSequences()
             if non_pending_fragment_sequences:
@@ -299,11 +304,11 @@ class FragmentCache(object):
             if self.policy == self.POLICY_PASS:
                 # if self.debug:
                 #     print("with policy pass")
-                self._flush_percentage_filled()
+                self._flush_percentage_filled(totalflush)
             elif self.policy == self.POLICY_FILL:
                 # if self.debug:
                 #     print("with policy fill")
-                self._flush_percentage_filled()
+                self._flush_percentage_filled(totalflush)
                 self._flush_resource_appending()
             elif self.policy == self.POLICY_FILL_ALWAYS:
                 # if self.debug:
@@ -475,6 +480,8 @@ class FragmentCache(object):
                 print("remaining fragments:", len(self.fragment_cache))
             assert self.cache_total_fragmentsize >= 0, repr([fragments_buffer_size, self.cache_total_fragmentsize])
 
+
+
     def _flush_percentage_filled(self, empty=False):
         """
         pack fragments in cache into percentage or fully filled resources if possible.
@@ -483,24 +490,24 @@ class FragmentCache(object):
         with self._mutex:
             # test02
             # print(list(self.fragment_cache.values()))
-            fragments_dict = {f: f.fragment_size for _, f in self.fragment_cache.values()}
-            resources = binpacking.to_constant_volume(fragments_dict, self.resource_size,
-                                                      upper_bound=self.resource_size + 1)
+            # fragments_dict = {f: f.fragment_size for _, f in self.fragment_cache.values()}
+            resources = self.resource_packer.getFragmentPackets(self.resource_size, (f for _, f in self.fragment_cache.values()))
+            # if not empty:
+            #     resources = self.resource_packer.checkPackagesReachMinimumFillLevel(resources, self.resource_size,
+            #                                                             self.resource_minimum_filllevel,
+            #                                                             not empty)
             # resources = sorted(resources, key=lambda r: sum(r.values()), reverse=True)
+            if empty is False:
+                if not self.resource_packer.checkPackagesReachMinimumFillLevel(resources, self.resource_size, self.resource_minimum_filllevel):
+                    print("unable to flush fragment cache without forceful emptying, all fragment packets would not reach "
+                          "the desired minimum resource fill level. "
+                          "this can lead to a huge memory leak", file=sys.stderr)
+                    return
+                else:
+                    resources = [resources[0]]
             for packed_fragments_size_dict in resources:
-                resource_payload_size = sum(packed_fragments_size_dict.values())
-                # resource would not meet fill percentage constraint and emptying i forbidden
-                if resource_payload_size / self.resource_size < self.resource_minimum_filllevel and not empty:
-                    # print("skipping", resource_payload_size / self.resource_size, self.resource_minimum_filllevel)
-                    # print(resource_payload_size / self.resource_size < self.resource_minimum_filllevel)
-                    continue
-                fragment_package_list = list(packed_fragments_size_dict.keys())
-                # fragment_package_list.sort(key=lambda f: f.fragment_id)
-                # fragment_package_list.sort(key=lambda f: hash(f.fragment_hash))
-                fragment_package_list.sort(key=lambda f: f.fragment_hash)
-                # print(fragment_package_list[0].fragment_hash.hex())
+                fragment_package_list = sorted(packed_fragments_size_dict.keys(), key=lambda f: f.fragment_hash)
                 self._upload_and_map_fragments([f.fragment_hash for f in fragment_package_list])
-                # print('should have uploaded')
 
     def _flush_resource_appending(self, empty=False):
         """
@@ -578,3 +585,53 @@ class FragmentCache(object):
                 else:
                     self._flush_percentage_filled(empty=empty)
                     abort_appending = True
+
+
+class ResourcePacker(object):
+    BIN_PACKING = 1
+    FILLING = 2
+
+    def __init__(self, packing_method=FILLING):
+        # type: (int) -> None
+        self.packing_method = packing_method
+
+    def getFragmentPackets(self, resource_size, fragments):
+        # type: (ResourceSize, Iterable[Fragment]) -> List[Dict[Fragment, FragmentSize]]
+        # fragments_size_dict = {f:f.fragment_size for f in fragments}
+        if self.packing_method == self.BIN_PACKING:
+            packets = self._get_binpacked_resources(resource_size, fragments)
+        elif self.packing_method == self.FILLING:
+            packets = self._get_sequential_filled_resources(resource_size, fragments)
+        else:
+            raise NotImplementedError
+        return sorted(packets, key=lambda packet: sum(packet.values()), reverse=True)
+
+    def checkPackagesReachMinimumFillLevel(self, packets, resource_size, minimum_fill_level):
+        # type: (List[Dict[Fragment, FragmentSize]], ResourceSize, float) -> bool
+        if minimum_fill_level > 1.0:
+            raise ValueError("fill level greater than 100% | 1.0")
+        return any((sum(packet.values()) / resource_size >= minimum_fill_level for packet in packets))
+
+    def _get_binpacked_resources(self, resource_size, fragments):
+        # type: (ResourceSize, Iterable[Fragment]) -> List[Dict[Fragment, FragmentSize]]
+        return binpacking.to_constant_volume({f:f.fragment_size for f in fragments}, resource_size, upper_bound=resource_size + 1)
+
+    def _get_sequential_filled_resources(self, resource_size, fragments):
+        # type: (ResourceSize, Iterable[Fragment]) -> List[Dict[Fragment, FragmentSize]]
+        buckets = []
+        new_bucket = OrderedDict()
+        new_bucket_size = 0
+        for fragment in fragments:
+            if new_bucket_size + fragment.fragment_size > resource_size:
+                buckets.append(new_bucket)
+                new_bucket = OrderedDict()
+                new_bucket_size = 0
+            new_bucket[fragment] = fragment.fragment_size
+            new_bucket_size += fragment.fragment_size
+        if len(new_bucket):
+            buckets.append(new_bucket)
+        return buckets
+
+
+class PackingError(Exception):
+    pass
