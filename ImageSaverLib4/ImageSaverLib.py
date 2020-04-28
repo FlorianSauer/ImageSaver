@@ -61,7 +61,6 @@ class ImageSaver(object):
                                             makeCompressingType(PassThroughCompressor),
                                             resource_size, self.pending_objects,
                                             self.wrapper, self.compresser,
-                                            # resource_minimum_filllevel=1.0,
                                             debug=False)  # type: FragmentCache
 
     def __enter__(self):
@@ -71,7 +70,6 @@ class ImageSaver(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._within_context -= 1
-        # print("islib", self._within_context, exc_type, exc_val, exc_tb)
         error = True
         try:
             self.fragment_cache.__exit__(exc_type, exc_val, exc_tb)
@@ -79,11 +77,8 @@ class ImageSaver(object):
         except Exception as e:
             exc_type = type(e)
             exc_tb = e.__traceback__
-            # finally:
             if error:
                 print("EXCEPTION CLEANUP, exception", e, "occured, removing pending compounds+fragments from meta...")
-                # if exc_tb:
-                #     print("catched exception", exc_type, exc_val, exc_tb)
                 print("removing", len(self.pending_objects.getPendingCompounds()), "pending compounds",
                       "due to an error", exc_type)
                 for c in self.pending_objects.getPendingCompounds():
@@ -98,13 +93,13 @@ class ImageSaver(object):
                 assert len(self.pending_objects.getPendingCompounds()) == 0, repr(
                     self.pending_objects.getPendingCompounds())
                 raise
-        # if exc_tb:
-        #     assert len(self.pending_objects.getPendingCompounds()) == 0, repr(
-        #         self.pending_objects.getPendingCompounds())
-        #     return False
 
     def flush(self):
         self.fragment_cache.flush(force=True)
+
+    def flushPending(self):
+        if self._within_context == 0:
+            self.__exit__(None, None, None)
 
     @property
     def defaultCompoundWrapper(self):
@@ -202,9 +197,7 @@ class ImageSaver(object):
         )
         self._compress_type = value
 
-    def flushPending(self):
-        if self._within_context == 0:
-            self.__exit__(None, None, None)
+
 
     def changeFragmentSize(self, fragmentSize):
         # type: (int) -> None
