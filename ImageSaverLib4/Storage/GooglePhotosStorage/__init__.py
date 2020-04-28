@@ -109,7 +109,7 @@ class GooglePhotosStorage(AbstractSizableStorageInterface, StorageBuilderInterfa
 
         # if albums dict is empty, create a new album
         if len(self.albums) == 0:
-            print("creating storage album", self._album_praefix+'0')
+            self.debugPrint("creating storage album", self._album_praefix+'0')
             a = self.api.createAlbum(self._album_praefix+'0')
             self.albums_count[a.id] = a.mediaItemsCount
             self.albums[a.id] = a
@@ -124,7 +124,7 @@ class GooglePhotosStorage(AbstractSizableStorageInterface, StorageBuilderInterfa
                 return self.albums[biggest_album_title]
             else:
                 # all albums are maxed out to 20000, create a new one
-                print("creating storage album", self._album_praefix + str(len(self.albums)))
+                self.debugPrint("creating storage album", self._album_praefix + str(len(self.albums)))
                 a = self.api.createAlbum(self._album_praefix + str(len(self.albums)))
                 self.albums_count[a.id] = a.mediaItemsCount
                 self.albums[a.id] = a
@@ -139,8 +139,8 @@ class GooglePhotosStorage(AbstractSizableStorageInterface, StorageBuilderInterfa
         try:
             self.albums_count[album.id] += 1
         except KeyError:
-            print(self.albums_count)
-            print(self.albums)
+            self.debugPrint(self.albums_count)
+            self.debugPrint(self.albums)
             raise
         self.increaseCurrentSize(resource_size)
         return self.format_resource_name(album.id, new_media_item.mediaItem.id)
@@ -151,7 +151,7 @@ class GooglePhotosStorage(AbstractSizableStorageInterface, StorageBuilderInterfa
                 if album.title == self._trash_album:
                     self.trash_album = album
                     return self.trash_album
-            print("creating trash album")
+            self.debugPrint("creating trash album")
             self.trash_album = self.api.createAlbum(self._trash_album)
             return self.trash_album
         else:
