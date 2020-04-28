@@ -2,17 +2,17 @@ import hashlib
 import os
 from unittest import TestCase
 
-from ImageSaverLib4.FragmentCache import FragmentCache
-from ImageSaverLib4.MetaDB.Types.Fragment import FragmentSize, FragmentPayloadSize
-from ImageSaverLib4.MetaDB.Types.Resource import ResourceSize
-from ImageSaverLib4.MetaDB.db_inits import sqliteRAM, sqliteFile
-from ImageSaverLib4.PendingObjectsController import PendingObjectsController
-from ImageSaverLib4.Storage.RamStorage import RamStorage
-from ImageSaverLib4.Storage.Cache.RamCache import RamStorageCache
-from ImageSaverLib4.Encapsulation import makeWrappingType, makeCompressingType
-from ImageSaverLib4.Encapsulation.Wrappers.Types import *
-from ImageSaverLib4.Encapsulation.Compressors.Types import *
-from ImageSaverLib4.Storage.VoidStorage import VoidStorage
+from ImageSaverLib.FragmentCache import FragmentCache
+from ImageSaverLib.MetaDB.Types.Fragment import FragmentSize, FragmentPayloadSize
+from ImageSaverLib.MetaDB.Types.Resource import ResourceSize
+from ImageSaverLib.MetaDB.db_inits import sqliteRAM, sqliteFile
+from ImageSaverLib.PendingObjectsController import PendingObjectsController
+from ImageSaverLib.Storage.RamStorage import RamStorage
+from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
+from ImageSaverLib.Encapsulation import makeWrappingType, makeCompressingType
+from ImageSaverLib.Encapsulation.Wrappers.Types import *
+from ImageSaverLib.Encapsulation.Compressors.Types import *
+from ImageSaverLib.Storage.VoidStorage import VoidStorage
 
 
 class TestFragmentCache(TestCase):

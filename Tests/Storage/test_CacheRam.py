@@ -1,7 +1,7 @@
 import unittest
 
-from ImageSaverLib4.Storage.Cache.RamCache import RamStorageCache
-from ImageSaverLib4.Storage.RamStorage import RamStorage
+from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
+from ImageSaverLib.Storage.RamStorage import RamStorage
 from .test_basicStorage import TestBasicStorage
 
 

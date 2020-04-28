@@ -3,10 +3,10 @@ import os
 import unittest
 from typing import Callable, Type, Union
 
-from ImageSaverLib4.Encapsulation.Compressors.AutoCompressor import AutoCompressor
-from ImageSaverLib4.Encapsulation.Compressors.BaseCompressor import BaseCompressor
-from ImageSaverLib4.Encapsulation.Compressors.StackedCompressor import StackedCompressor
-from ImageSaverLib4.Encapsulation.Compressors.Types import *
+from ImageSaverLib.Encapsulation.Compressors.AutoCompressor import AutoCompressor
+from ImageSaverLib.Encapsulation.Compressors.BaseCompressor import BaseCompressor
+from ImageSaverLib.Encapsulation.Compressors.StackedCompressor import StackedCompressor
+from ImageSaverLib.Encapsulation.Compressors.Types import *
 from .testBasicCompressor import TestBasicCompressor
 
 

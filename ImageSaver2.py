@@ -15,16 +15,16 @@ from fs.base import FS
 from fs.errors import CreateFailed, ResourceNotFound, PermissionDenied, FileExpected
 from fs.osfs import OSFS
 
-from ImageSaverLib4.Encapsulation.Wrappers.Types import AES256CTRWrapper, PassThroughWrapper
-from ImageSaverLib4.Errors import CompoundNotExistingException
-from ImageSaverLib4.FragmentCache import FragmentCache
-from ImageSaverLib4.Helpers import get_size_of_stream
-from ImageSaverLib4.Helpers.TqdmReporter import TqdmUpTo
-from ImageSaverLib4.ImageSaverFS2 import ImageSaverFS
-from ImageSaverLib4.ImageSaverLib import ImageSaver
-from ImageSaverLib4.MetaDB.MetaDB import MetaDBInterface
-from ImageSaverLib4.MetaDB.Types.Compound import Compound
-from ImageSaverLib4.Storage.StorageInterface import StorageInterface
+from ImageSaverLib.Encapsulation.Wrappers.Types import AES256CTRWrapper, PassThroughWrapper
+from ImageSaverLib.Errors import CompoundNotExistingException
+from ImageSaverLib.FragmentCache import FragmentCache
+from ImageSaverLib.Helpers import get_size_of_stream
+from ImageSaverLib.Helpers.TqdmReporter import TqdmUpTo
+from ImageSaverLib.ImageSaverFS2 import ImageSaverFS
+from ImageSaverLib.ImageSaverLib import ImageSaver
+from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
+from ImageSaverLib.MetaDB.Types.Compound import Compound
+from ImageSaverLib.Storage.StorageInterface import StorageInterface
 
 
 class Actions(object):
@@ -363,17 +363,17 @@ class ImageSaverApp(object):
 
     @property
     def storage(self):
-        from ImageSaverLib4.Storage.Cache.LocalCache import LocalCache
-        from ImageSaverLib4.Storage.Cache.RamCache import RamStorageCache
-        from ImageSaverLib4.Storage.DropboxStorage import DropboxStorage
-        from ImageSaverLib4.Storage.FileSystemStorage import FileSystemStorage2
-        from ImageSaverLib4.Storage.GooglePhotosStorage import GooglePhotosStorage
-        from ImageSaverLib4.Storage.RamStorage import RamStorage
-        from ImageSaverLib4.Storage.SambaStorage import SambaStorage
-        from ImageSaverLib4.Storage.StorageBuilder import StorageBuilder
-        from ImageSaverLib4.Storage.SynchronizedStorage import SynchronizedStorage
-        from ImageSaverLib4.Storage.VoidStorage import VoidStorage
-        from ImageSaverLib4.Storage.RedundantStorage import RedundantStorage
+        from ImageSaverLib.Storage.Cache.LocalCache import LocalCache
+        from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
+        from ImageSaverLib.Storage.DropboxStorage import DropboxStorage
+        from ImageSaverLib.Storage.FileSystemStorage import FileSystemStorage2
+        from ImageSaverLib.Storage.GooglePhotosStorage import GooglePhotosStorage
+        from ImageSaverLib.Storage.RamStorage import RamStorage
+        from ImageSaverLib.Storage.SambaStorage import SambaStorage
+        from ImageSaverLib.Storage.StorageBuilder import StorageBuilder
+        from ImageSaverLib.Storage.SynchronizedStorage import SynchronizedStorage
+        from ImageSaverLib.Storage.VoidStorage import VoidStorage
+        from ImageSaverLib.Storage.RedundantStorage import RedundantStorage
         if self._storage:
             return self._storage
         else:
@@ -470,9 +470,9 @@ class ImageSaverApp(object):
         if self._meta:
             return self._meta
         else:
-            from ImageSaverLib4.MetaDB.MetaBuilder import MetaBuilder
-            from ImageSaverLib4.MetaDB.db_inits import (sqliteRAM, SqliteRamBuilder, SqliteFileBuilder,
-                                                        PostgresBuilder)
+            from ImageSaverLib.MetaDB.MetaBuilder import MetaBuilder
+            from ImageSaverLib.MetaDB.db_inits import (sqliteRAM, SqliteRamBuilder, SqliteFileBuilder,
+                                                       PostgresBuilder)
             meta_builder = MetaBuilder()
             meta_builder.addMetaClass(SqliteRamBuilder)
             meta_builder.addMetaClass(SqliteFileBuilder)
@@ -1527,7 +1527,7 @@ class ImageSaverApp(object):
                 print("unknown profile loaded")
 
     def runFTP(self):
-        from ImageSaverLib4.FTPServer import serve_fs
+        from ImageSaverLib.FTPServer import serve_fs
         saver = self.save_service
         is_fs = self.is_fs
         with saver:

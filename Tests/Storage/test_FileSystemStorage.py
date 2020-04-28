@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 
-from ImageSaverLib4.Storage.FileSystemStorage import FileSystemStorage2
+from ImageSaverLib.Storage.FileSystemStorage import FileSystemStorage2
 from .test_basicStorage import TestBasicStorage
 
 

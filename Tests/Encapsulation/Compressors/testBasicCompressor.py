@@ -4,7 +4,7 @@ from abc import abstractmethod, ABC
 
 import humanfriendly
 
-from ImageSaverLib4.Encapsulation import BaseCompressor
+from ImageSaverLib.Encapsulation import BaseCompressor
 
 
 class TestBasicCompressor(unittest.TestCase, ABC):

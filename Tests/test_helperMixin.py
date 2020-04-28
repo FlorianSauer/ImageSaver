@@ -6,8 +6,8 @@ from sqlalchemy.engine import Engine, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker
 
-from ImageSaverLib4.MetaDB.SQLAlchemyHelperMixin import SQLAlchemyHelperMixin
-from ImageSaverLib4.MetaDB.Types import ColumnPrinterMixin
+from ImageSaverLib.MetaDB.SQLAlchemyHelperMixin import SQLAlchemyHelperMixin
+from ImageSaverLib.MetaDB.Types import ColumnPrinterMixin
 
 Base = declarative_base()
 

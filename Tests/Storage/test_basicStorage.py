@@ -7,12 +7,12 @@ from typing import cast
 
 import humanfriendly
 
-from ImageSaverLib4.Encapsulation import AutoWrapper
-from ImageSaverLib4.MetaDB.MetaDB import MetaDBInterface
-from ImageSaverLib4.MetaDB.Types.Resource import ResourceSize, ResourceHash, ResourcePayloadSize, \
+from ImageSaverLib.Encapsulation import AutoWrapper
+from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
+from ImageSaverLib.MetaDB.Types.Resource import ResourceSize, ResourceHash, ResourcePayloadSize, \
     ResourceCompressionType
-from ImageSaverLib4.MetaDB.db_inits import sqliteRAM
-from ImageSaverLib4.Storage.StorageInterface import StorageInterface
+from ImageSaverLib.MetaDB.db_inits import sqliteRAM
+from ImageSaverLib.Storage.StorageInterface import StorageInterface
 
 
 class TestBasicStorage(unittest.TestCase, ABC):

@@ -2,8 +2,8 @@ import os
 from configparser import ConfigParser
 from unittest import TestCase
 
-from ImageSaverLib4.MetaDB.MetaBuilder import MetaBuilder
-from ImageSaverLib4.MetaDB.db_inits import sqliteRAM, SqliteFileBuilder, SqliteRamBuilder, PostgresBuilder
+from ImageSaverLib.MetaDB.MetaBuilder import MetaBuilder
+from ImageSaverLib.MetaDB.db_inits import sqliteRAM, SqliteFileBuilder, SqliteRamBuilder, PostgresBuilder
 
 
 def toAbsPath(s):

@@ -2,8 +2,8 @@ import shutil
 import tempfile
 import unittest
 
-from ImageSaverLib4.Storage.Cache.LocalCache import LocalCache
-from ImageSaverLib4.Storage.RamStorage import RamStorage
+from ImageSaverLib.Storage.Cache.LocalCache import LocalCache
+from ImageSaverLib.Storage.RamStorage import RamStorage
 from .test_basicStorage import TestBasicStorage
 
 

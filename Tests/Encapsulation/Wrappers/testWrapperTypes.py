@@ -5,10 +5,10 @@ from typing import Callable, Type, Union
 
 import humanfriendly
 
-from ImageSaverLib4.Encapsulation.Wrappers.AutoWrapper import AutoWrapper
-from ImageSaverLib4.Encapsulation.Wrappers.BaseWrapper import BaseWrapper
-from ImageSaverLib4.Encapsulation.Wrappers.StackedWrapper import StackedWrapper
-from ImageSaverLib4.Encapsulation.Wrappers.Types import *
+from ImageSaverLib.Encapsulation.Wrappers.AutoWrapper import AutoWrapper
+from ImageSaverLib.Encapsulation.Wrappers.BaseWrapper import BaseWrapper
+from ImageSaverLib.Encapsulation.Wrappers.StackedWrapper import StackedWrapper
+from ImageSaverLib.Encapsulation.Wrappers.Types import *
 from .testBasicWrapper import TestBasicWrapper
 
 

@@ -4,14 +4,14 @@ from unittest import TestCase
 from tqdm import tqdm
 import humanfriendly
 
-from ImageSaverLib4.Encapsulation import makeWrappingType, makeCompressingType
-from ImageSaverLib4.Encapsulation.Wrappers.Types import *
-from ImageSaverLib4.Encapsulation.Compressors.Types import *
-from ImageSaverLib4.Errors import *
-from ImageSaverLib4.ImageSaverLib import ImageSaver
-from ImageSaverLib4.MetaDB.db_inits import sqliteRAM
-from ImageSaverLib4.Storage.Errors import NotFoundError
-from ImageSaverLib4.Storage.RamStorage import RamStorage
+from ImageSaverLib.Encapsulation import makeWrappingType, makeCompressingType
+from ImageSaverLib.Encapsulation.Wrappers.Types import *
+from ImageSaverLib.Encapsulation.Compressors.Types import *
+from ImageSaverLib.Errors import *
+from ImageSaverLib.ImageSaverLib import ImageSaver
+from ImageSaverLib.MetaDB.db_inits import sqliteRAM
+from ImageSaverLib.Storage.Errors import NotFoundError
+from ImageSaverLib.Storage.RamStorage import RamStorage
 
 VERBOSE_SAVE_SERVICE = False
 

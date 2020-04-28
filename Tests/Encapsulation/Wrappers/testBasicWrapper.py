@@ -4,7 +4,7 @@ from abc import abstractmethod, ABC
 
 import humanfriendly
 
-from ImageSaverLib4.Encapsulation import BaseWrapper
+from ImageSaverLib.Encapsulation import BaseWrapper
 
 
 class TestBasicWrapper(unittest.TestCase, ABC):
