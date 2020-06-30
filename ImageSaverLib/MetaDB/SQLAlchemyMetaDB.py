@@ -1,6 +1,6 @@
 from typing import Type, Tuple, List
 
-from sqlalchemy import func, asc
+from sqlalchemy import func, asc, and_
 # noinspection PyProtectedMember
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker, scoped_session, Query, aliased, Session
@@ -194,14 +194,6 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             # return SizedGenerator((fh for fh in gen), len(gen))
             # return [fh for fh, in query.all()]
 
-    # def hasPayloadForCompound(self, compound_id):
-    #     with self.session_scope():
-    #         try:
-    #             self._get(CompoundPayloadMapping, CompoundPayloadMapping.compound_id == compound_id)
-    #             return True
-    #         except NotExistingException:
-    #             return False
-
     def getAllCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None,
                         slash_count=None, min_size=None):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
@@ -229,15 +221,29 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                     raise ValueError('negative minimum file size')
                 query = query.filter(Compound.compound_size >= min_size)
             return self._exposable_lengen_query(exposed_session, query)
-            #     return self._get_all2(Compound, )
-            # else:
-            #     return self._get_all2(Compound)
 
-    # def test(self, starting_with, number_of_slashes=1):
-    #     with self.session_scope():
-    #         query = self.session.query(Compound)  # type: Query
-    #         query.filter(Compound.compound_name.startswith(starting_with))
-    #         query.filter(not_(Compound.compound_name.ilike('/%'*number_of_slashes)))
+    def getAllCompoundsSizeSum(self, type_filter=None, starting_with=None, ending_with=None, slash_count=None,
+                               min_size=None):
+        with self.session_scope() as session:  # type: Session
+            query = session.query(functions.sum(Compound.compound_size))  # type: Query
+            if type_filter:
+                query = query.filter(Compound.compound_type == type_filter)
+            if starting_with:
+                query = query.filter(Compound.compound_name.startswith(starting_with))
+            if ending_with:
+                query = query.filter(Compound.compound_name.endswith(ending_with))
+            if slash_count is not None:
+                if slash_count < 0:
+                    raise ValueError("only 0 or positive numbers allowed")
+                query = query.filter(Compound.compound_name.ilike('/%' * slash_count))
+                slash_count += 1
+                query = query.filter(not_(Compound.compound_name.ilike('/%' * slash_count)))
+            if min_size is not None:
+                if min_size < 0:
+                    raise ValueError('negative minimum file size')
+                query = query.filter(Compound.compound_size >= min_size)
+            size = query.one()[0]
+            return 0 if size is None else int(size)
 
     def getAllCompoundNames(self):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
@@ -784,17 +790,19 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
     def getAllFragmentsSortedByCompoundUsage(self):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
             session = exposed_session.session
-            sub_query = session.query(Fragment)  # type: Query
-            sub_query = sub_query.select_from(CompoundFragmentMapping)
-            # query = query.distinct(Fragment.fragment_id)
-            sub_query = sub_query.outerjoin(Fragment, CompoundFragmentMapping.fragment_id == Fragment.fragment_id)
-            sub_query = sub_query.order_by(CompoundFragmentMapping.compound_id.asc(),
-                                           CompoundFragmentMapping.sequence_index.asc())
-            sub_query = sub_query.subquery()  # type: Type[Fragment]
+            fragment_distinct = session.query(func.min(CompoundFragmentMapping.compound_id).label('compound_id'), CompoundFragmentMapping.fragment_id)  # type: Query
+            fragment_distinct = fragment_distinct.select_from(CompoundFragmentMapping)
+            fragment_distinct = fragment_distinct.group_by(CompoundFragmentMapping.fragment_id)
+            fragment_distinct = fragment_distinct.subquery('fragment_distinct')
 
-            query = session.query(Fragment)  # type: Query
-            query = query.select_entity_from(sub_query)
-            query = query.distinct(Fragment.fragment_id)
+            query = session.query(fragment_distinct.c.compound_id, CompoundFragmentMapping.sequence_index,
+                                  Fragment)  # type: Query
+            query = query.select_from(fragment_distinct)
+            query = query.outerjoin(CompoundFragmentMapping,
+                                    and_(fragment_distinct.c.compound_id == CompoundFragmentMapping.compound_id,
+                                    fragment_distinct.c.fragment_id == CompoundFragmentMapping.fragment_id))
+            query = query.outerjoin(Fragment, fragment_distinct.c.fragment_id == Fragment.fragment_id)
+            query = query.order_by(fragment_distinct.c.compound_id.asc(), CompoundFragmentMapping.sequence_index.asc())
 
             return self._exposable_lengen_query(exposed_session, query)
 
@@ -806,7 +814,6 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                                                    fragment_size=fragment.fragment_size,
                                                    fragment_payload_size=fragment.fragment_payload_size)
                 new_fragments_offset.append((new_fragment, offset))
-            # with self.session_scope():
             for chunk in chunkiterable_gen((f.fragment_id for f, _ in new_fragments_offset), 500, skip_none=True):
                 try:
                     self._delete(session, FragmentResourceMapping, FragmentResourceMapping.fragment_id.in_(chunk))

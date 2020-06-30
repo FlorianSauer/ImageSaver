@@ -124,6 +124,11 @@ class MetaDBInterface(ABC):
         pass
 
     @abstractmethod
+    def getAllCompoundsSizeSum(self, type_filter=None, starting_with=None, ending_with=None, slash_count=None, min_size=None):
+        # type: (Optional[CompoundType], Optional[str], Optional[str], Optional[int], Optional[int]) -> int
+        pass
+
+    @abstractmethod
     def getAllCompoundNames(self):
         # type: () -> SizedGenerator[CompoundName, Any, None]
         pass
@@ -433,7 +438,7 @@ class MetaDBInterface(ABC):
         pass
 
     def getAllFragmentsSortedByCompoundUsage(self):
-        # type: () -> SizedGenerator[Fragment]
+        # type: () -> SizedGenerator[Tuple[CompoundID, SequenceIndex, Fragment]]
         pass
 
     @abstractmethod
