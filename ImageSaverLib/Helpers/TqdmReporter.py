@@ -6,25 +6,10 @@ from tqdm import tqdm
 class TqdmUpTo(tqdm):
     """Provides `update_to(n)` which uses `tqdm.update(delta_n)`."""
 
-    def __init__(self, iterable=None, desc=None, total=None, leave=True, file=None, ncols=None, mininterval=0.1,
-                 maxinterval=10.0, miniters=None, ascii=None, disable=False, unit='it', unit_scale=False,
-                 dynamic_ncols=False, smoothing=0.3, bar_format=None, initial=0, position=None, postfix=None,
-                 unit_divisor=1000, gui=False, **kwargs):
-        super().__init__(iterable, desc, total, leave, file, ncols, mininterval, maxinterval, miniters, ascii, disable,
-                         unit, unit_scale, dynamic_ncols, smoothing, bar_format, initial, position, postfix,
-                         unit_divisor, gui, **kwargs)
-
-    # def __init__(self, iterable=None, desc=None, total=None, leave=True, file=None, ncols=None, mininterval=0.1,
-    #              maxinterval=10.0, miniters=None, ascii=None, disable=False, unit='it', unit_scale=False,
-    #              dynamic_ncols=False, smoothing=0.3, bar_format=None, initial=0, position=None, postfix=None,
-    #              unit_divisor=1000, gui=False, **kwargs):
-    #     super().__init__(iterable, desc, total, leave, file, ncols, mininterval, maxinterval, miniters, ascii, disable,
-    #                      unit, unit_scale, dynamic_ncols, smoothing, bar_format, initial, position, postfix,
-    #                      unit_divisor, gui, **kwargs)
-    #     self._last = 0
-    #
-    # def update_add(self, transferred, total):
-
+    def write(self, s, file=None, end="\n", nolock=False):
+        if self.disable:
+            return
+        return super(TqdmUpTo, self).write(s, file, end, nolock)
 
     def update_to(self, b=1, bsize=1, tsize=None):
         # type: (Optional[int], Optional[int], Optional[int]) -> None
