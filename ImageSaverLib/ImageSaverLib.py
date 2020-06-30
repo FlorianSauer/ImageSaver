@@ -47,6 +47,7 @@ class ImageSaver(object):
         self.storage = storage  # storage interface, can throw all kinds of exceptions during upload
         self.meta = meta  # type: MetaDBInterface
         self.fragment_size = fragment_size
+        self.resource_size = resource_size
         self.reserved_compounds = AccessManager(CompoundName)
         self.reserved_fragments = AccessManager(FragmentHash)
         self.reserved_resources = AccessManager(ResourceName)
@@ -627,6 +628,45 @@ class ImageSaver(object):
                 self.fragment_cache.resource_reuse_blacklist = orig_blacklist
                 self.fragment_cache.policy = orig_policy
 
+    def combineResourceSpace(self, fill_percentage=0.5, blocking=True, timeout=None, progressreporter=None):
+        # type: (Optional[float], bool, Optional[float], Optional[TqdmUpTo]) -> None
+        """
+        combines resources, which have a fragment fill-level or resource size of fill_percentage percent of a full
+        resource.
+        if sum(<size of fragments in a resource>) <= <fill_percentage percentage of maximum resouce size>:
+            extract fragments and re-add them to the fragment cache to build new resources
+        """
+        with self.meta:
+            if fill_percentage is None:
+                fill_percentage = self.fragment_cache.resource_minimum_filllevel
+            assert 0 <= fill_percentage <= 1
+            resources_fragment_sizes = self.meta.getResourceWithReferencedFragmentSize()
+            resources_fragment_sizes = [(r, f) for r, f in resources_fragment_sizes if
+                                        (f/self.resource_size <= fill_percentage)]# or
+                                         # r.resource_size/self.resource_size <= fill_percentage)]
+            resources_count = len(resources_fragment_sizes)
+            if resources_count < 2:
+                progressreporter.write('only one Resource is under the {0}% mark and optimisable, skipping'.format(fill_percentage*100))
+                return
+            for index, (resource, fragment_sizes) in enumerate(resources_fragment_sizes):
+                with ExclusiveAccessContext(self.reserved_resources, resource.resource_name, blocking=blocking,
+                                            timeout=timeout):
+                    fragments = self.meta.getFragmentsWithOffsetOnResource(resource.resource_id)
+                    fragments = fragments.add_layer(lambda gen: (f for f, _ in gen))
+                    fragments = sorted(list(fragments), key=lambda f: f.fragment_size, reverse=True)
+                    if progressreporter is not None:
+                        progressreporter.write(
+                            'can re-add {0} Fragments of Resource {1}, {2:3.2f}% of a full Resource'.format(
+                                len(fragments), resource.resource_name, (fragment_sizes / self.resource_size) * 100.0))
+
+                    with ExclusiveMassReserver(self.reserved_fragments, *(f.fragment_hash for f in fragments),
+                                               blocking=blocking, timeout=timeout):
+                        for fragment in fragments:
+                            fragment_data = self.fragment_cache.loadFragment(fragment)
+                            self.fragment_cache.addFragment(fragment_data, fragment, readd=True)
+                if progressreporter is not None:
+                    progressreporter.update_to(index + 1, tsize=resources_count)
+
     def defragmentResources(self, progressreporter=None):
         # type: (Optional[TqdmUpTo]) -> None
         self.fragment_cache.flush(force=True)
@@ -638,7 +678,7 @@ class ImageSaver(object):
             unneeded_fragment_gen = self.meta.getUnneededFragments()
             unneeded_fragment_gen_len = len(unneeded_fragment_gen)
             fragments_count = fragment_gen_len + unneeded_fragment_gen_len
-            for index, fragment in enumerate(fragment_gen):
+            for index, (compound_id, sequence_index, fragment) in enumerate(fragment_gen):
                 fragment_data = self.fragment_cache.loadFragment(fragment)
                 self.fragment_cache.addFragment(fragment_data, fragment, readd=True)
                 if progressreporter is not None:
@@ -648,7 +688,8 @@ class ImageSaver(object):
                 self.fragment_cache.addFragment(fragment_data, fragment, readd=True)
                 if progressreporter is not None:
                     progressreporter.update_to(fragment_gen_len + index + 1, tsize=fragments_count)
-            progressreporter.update_to(fragments_count, tsize=fragments_count)
+            if progressreporter is not None:
+                progressreporter.update_to(fragments_count, tsize=fragments_count)
             self.fragment_cache.flush(force=True)
         finally:
             self.fragment_cache.policy = orig_fc_policy
@@ -734,15 +775,15 @@ class ImageSaver(object):
                 if progressreporter is not None:
                     progressreporter.update_to(index + 1, tsize=len(resource_len_gen))
 
-    def checkConsistencyOfAllCompounds(self, progressreporter=None):
-        # type: (TqdmUpTo) -> None
+    def checkConsistencyOfAllCompounds(self, starting_with=None, progressreporter=None):
+        # type: (Optional[str], TqdmUpTo) -> None
         """
         checks if all saved Compounds can be correctly reassembled by downloading everything to a /dev/null file
         """
-        total_compound_size = self.getTotalCompoundSize()
+        total_compound_size = self.meta.getAllCompoundsSizeSum(starting_with=starting_with)
         with self.meta:
             processed_size = 0
-            for compound in self.meta.getAllCompounds():
+            for compound in self.meta.getAllCompounds(starting_with=starting_with):
                 if compound.compound_type == Compound.DIR_TYPE:
                     self.loadCompoundBytes(compound.compound_name)
                     continue
