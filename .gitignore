@@ -136,3 +136,4 @@ spock-facepalm.png
 upload.py
 DBCopyTest.py
 /Tests/BaseModules
+SQLAlchemyBulkInsertTest.py
