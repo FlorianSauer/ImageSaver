@@ -7,7 +7,7 @@ import re
 import stat
 import sys
 from configparser import ConfigParser
-from typing import List, Set, Union, Optional, cast, BinaryIO, IO
+from typing import List, Set, Union, Optional, cast, BinaryIO, IO, TextIO
 
 import fs
 import humanfriendly
@@ -26,6 +26,8 @@ from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
 from ImageSaverLib.MetaDB.Types.Compound import Compound
 from ImageSaverLib.Storage.StorageInterface import StorageInterface
 
+from ImageSaverLib.Storage.VerboseStorage import SizableVerboseStorage
+
 
 class Actions(object):
     upload = 'upload'
@@ -39,6 +41,7 @@ class Actions(object):
     ftp = 'ftp'
     repair = 'repair'
     profile = 'profile'
+    archive = 'archive'
 
 
 def checkIsPercentage(s):
@@ -110,6 +113,7 @@ class ImageSaverApp(object):
     CONF_NAME = '.isl_config.conf'
 
     # region parser setup
+    # noinspection PyTypeChecker
     argparser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, allow_abbrev=False)
     argparser.add_argument('--debug', help="Print debug infos", action='store_true')
     argparser.add_argument('--dbecho', help="Print debug infos of DB Connection", action='store_true')
@@ -158,6 +162,9 @@ class ImageSaverApp(object):
                                                                "Optionally removes unrecoverable Compounds.",
                                           allow_abbrev=False)
     profile_parser = subparsers.add_parser(Actions.profile, help="Switches between profiles.",
+                                           allow_abbrev=False)
+    archive_parser = subparsers.add_parser(Actions.archive,
+                                           help="Creates a local 'archive' in the current folder. a configuration file is saved under <archive name>.conf, which can be loaded with the main -c flag",
                                            allow_abbrev=False)
 
     upload_parser.add_argument('item', action='append', help="Add the given File or Directory to the Target."
@@ -246,23 +253,26 @@ class ImageSaverApp(object):
     statistic_parser.add_argument('-o', '--offline', action='store_true',
                                   help="Only prints Statistics using the database. "
                                        "This does not check the total count of Resources stored in the Storage.")
-    clean_parser.add_argument('-os', '--optimize-space',  # action='append',
+    clean_parser.add_argument('-os', '--optimize-space',
                               dest='optimize_space',
-                              help="Removes 'Fragment-Holes' in Resources; optimizes Space usage of resources by "
-                                   "removing all bytes which are not indexed. Optionally a percentage Value can be "
-                                   "passed, so only Resources with equals or greater procentual large "
-                                   "'Fragment-Holes' get removed. Example: '-os 10' to optimize Resources with 10%% "
-                                   "Fragment-Holes", default=None, const=0.0, nargs='?',
+                              help="Removes 'Fragment-Holes' in Resources, by downloading said Resources, removing of "
+                                   "not indexed bytes and re-uploading the remainging bytes as a new Resource. "
+                                   "Optionally a percentage Value can be passed, so only Resources with equals or "
+                                   "greater procentual large 'Fragment-Holes' get removed. Example: '-os 10' to "
+                                   "optimize Resources with 10%% Fragment-Holes",
+                              default=None, const=0.0, nargs='?',
                               type=checkIsPercentage)
-    # clean_parser.add_argument('-os', '--optimize-space', action='store_true', dest='optimize_space',
-    #                           help="Removes 'Fragment-Holes' in Resources; optimizes Space usage of resources by "
-    #                                "removing all bytes which are not indexed.")
-    clean_parser.add_argument('-of', '--optimize-fullness', action='store_true', dest='optimize_fullness',
-                              help="Combines multiple Fragments across multiple Resources into one Resource if "
-                                   "possible. Multiple clean -of calls will mostly rearrange fragments, resulting in "
-                                   "lots of Storage Service usage without really improving the overall resource usage. "
-                                   "Normally one call is sufficient. This operation will also optimize the space "
-                                   "usage, like --optimize-space in a different way.")
+
+    clean_parser.add_argument('-of', '--optimize-fullness',
+                              dest='optimize_fullness',
+                              help="Combines Fragments of too small or too empty resources into new and better filled "
+                                   "resources. Optional pass a percentage to optimize all resources, which total "
+                                   "fragment size is smaller or equal to the fraction of the maximum resource size. "
+                                   "Example: -of 30 will combine all resources, where the total fragment size stored "
+                                   "in it is smaller or equal to the 30%% fraction of the maximum supported resource "
+                                   "size.",
+                              default=None, const=-1, nargs='?',
+                              type=checkIsPercentage)
     clean_parser.add_argument('-kf', '--keep-fragments', action='store_true', dest='keep_fragments',
                               help="Does not remove Fragments, which are currently not used by any Compound")
     clean_parser.add_argument('-kr', '--keep-resources', action='store_true', dest='keep_resources',
@@ -277,8 +287,10 @@ class ImageSaverApp(object):
     check_parser.add_argument('-cr', '--check-resources', dest='consistency_resourcedata', action='store_true',
                               help="Checks if the Resources saved on Storage yield the correct ResourceHash after "
                                    "Downloading.")
-    check_parser.add_argument('-cc', '--check-compounds', dest='consistency_compounddata', action='store_true',
-                              help="Checks if the Compounds saved yield the correct Hashes after Downloading.")
+    check_parser.add_argument('-cc', '--check-compounds', dest='consistency_compounddata',  # action='store_true',
+                              help="Checks if the Compounds saved yield the correct Hashes after Downloading. "
+                                   "Optionally pass a string with which the compounds should start with.",
+                              const='', nargs='?')
 
     ftp_parser.add_argument('-a', '--address', default='127.0.0.1',
                             help="Sets the listen address of the FTP Server (default: %(default)s)")
@@ -291,6 +303,12 @@ class ImageSaverApp(object):
     profile_parser.add_argument('-s', '--switch', dest='switch', help="switch to an existing profile. "
                                                                       "Overwrites the profile provided with --config")
 
+    archive_parser.add_argument('-an', '--archive-name', dest='archive_name', default='isl_archive',
+                                help="The name of the config file and the folder, which contains the meta and the "
+                                     "storage")
+    archive_parser.add_argument('-rs', '--resource-size', dest='resource_size', type=humanfriendly.parse_size,
+                                help="Changes the Resource Size to use for the generated config. "
+                                     "If not specified, uses the resource size of the current storage")
     # endregion
 
     namespace = argparser.parse_args(sys.argv[1:])
@@ -363,20 +381,20 @@ class ImageSaverApp(object):
 
     @property
     def storage(self):
-        from ImageSaverLib.Storage.Cache.LocalCache import LocalCache
-        from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
-        from ImageSaverLib.Storage.DropboxStorage import DropboxStorage
-        from ImageSaverLib.Storage.FileSystemStorage import FileSystemStorage2
-        from ImageSaverLib.Storage.GooglePhotosStorage import GooglePhotosStorage
-        from ImageSaverLib.Storage.RamStorage import RamStorage
-        from ImageSaverLib.Storage.SambaStorage import SambaStorage
-        from ImageSaverLib.Storage.StorageBuilder import StorageBuilder
-        from ImageSaverLib.Storage.SynchronizedStorage import SynchronizedStorage
-        from ImageSaverLib.Storage.VoidStorage import VoidStorage
-        from ImageSaverLib.Storage.RedundantStorage import RedundantStorage
         if self._storage:
             return self._storage
         else:
+            from ImageSaverLib.Storage.Cache.LocalCache import LocalCache
+            from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
+            from ImageSaverLib.Storage.DropboxStorage import DropboxStorage
+            from ImageSaverLib.Storage.FileSystemStorage import FileSystemStorage2
+            from ImageSaverLib.Storage.GooglePhotosStorage import GooglePhotosStorage
+            from ImageSaverLib.Storage.RamStorage import RamStorage
+            from ImageSaverLib.Storage.SambaStorage import SambaStorage
+            from ImageSaverLib.Storage.StorageBuilder import StorageBuilder
+            from ImageSaverLib.Storage.SynchronizedStorage import SynchronizedStorage
+            from ImageSaverLib.Storage.VoidStorage import VoidStorage
+            from ImageSaverLib.Storage.RedundantStorage import RedundantStorage
             storage_builder = StorageBuilder()
             storage_builder.addStorageClass(DropboxStorage)
             storage_builder.addStorageClass(GooglePhotosStorage)
@@ -447,6 +465,8 @@ class ImageSaverApp(object):
                             return
                     else:
                         local_cache_size = 200
+                    if self.namespace.debug:
+                        print('using local cache of size', local_cache_size, file=sys.stderr)
                     storage = LocalCache(self.meta, storage, cache_size=local_cache_size, debug=False)
                 if not self.namespace.no_ram_cache:
                     if parser.has_option('isl', 'ram_cache_size'):
@@ -458,8 +478,10 @@ class ImageSaverApp(object):
                             exit(1)
                             return
                     else:
-                        ram_cache_size = 2
+                        ram_cache_size = 3
                     if ram_cache_size > 0:
+                        if self.namespace.debug:
+                            print('using ram cache of size', ram_cache_size, file=sys.stderr)
                         storage = RamStorageCache(storage, cache_size=ram_cache_size, debug=False)
                 self._storage = storage
             self._storage = SynchronizedStorage(self._storage)
@@ -488,6 +510,7 @@ class ImageSaverApp(object):
             return self._meta
 
     def _config_file(self, mode='r'):
+        # type: (str) -> Union[BinaryIO, TextIO]
         if os.path.exists(self.namespace.config):
             path = self.namespace.config
         elif os.path.exists(os.path.join(self.CONF_PATH, self.CONF_NAME)):
@@ -495,8 +518,8 @@ class ImageSaverApp(object):
         else:
             self.argparser.error('Config is missing!')
             exit(1)
+            # noinspection PyTypeChecker
             return
-        # print('open', path, mode)
         return open(path, mode)
 
     def _config_parser(self):
@@ -565,6 +588,8 @@ class ImageSaverApp(object):
             self.runRepair()
         elif self.namespace.action == Actions.profile:
             self.runProfile()
+        elif self.namespace.action == Actions.archive:
+            self.runArchive()
         else:
             self.argparser.print_help()
 
@@ -873,9 +898,6 @@ class ImageSaverApp(object):
                 return
         elif dest_file_exists and self.namespace.overwrite and not self.namespace.update:
             pass
-            # if not self.namespace.silent:
-            #     print(print_prefix+'already uploaded "' + globbed_src_file_name + '"', file=sys.stderr)
-            # return
         else:
             pass
         if not self.namespace.silent:
@@ -891,7 +913,6 @@ class ImageSaverApp(object):
                 for index, chunk in enumerate(
                         iter(lambda: src_file.read(self.save_service.fragment_size) or None, None)):
                     dst_file.write(chunk)
-                    # progressreporter.update_to(index+1, self.save_service.fragment_size, total_size)
                     progressreporter.update(len(chunk))
         self._set_frag_cache_on_upload_printer()
 
@@ -909,7 +930,6 @@ class ImageSaverApp(object):
         with TqdmUpTo(unit='Bytes', total=filesize,
                       unit_scale=True,
                       disable=self.namespace.silent) as progressreporter:
-            # progressreporter.write('downloading "' + filepath + '" ')
             self._set_frag_cache_on_download_callback(progressreporter)
             for index, chunk in enumerate(
                     iter(lambda: src_file.read(self.save_service.fragment_size) or None, None)):
@@ -1022,102 +1042,6 @@ class ImageSaverApp(object):
                     print('(' + str(fileindex + 1) + ' of ' + str(len(downloadable_files))
                           + ') downloading "' + filename + '"', file=sys.stderr)
                     self._download_file_to_target(self.is_fs, filename, dst_fs)
-
-    def runDownloadOLD(self):
-        if self.namespace.target == '-' and len(self.namespace.item[0]) > 1:
-            self.download_parser.error('cannot download and write multiple items to stdout')
-            return
-        mix_times = self.namespace.item[0]  # type: List[str]
-        download_names = []
-        for item in list(mix_times):
-            if self.save_service.hasCompoundWithName(item):
-                download_names.append(item)
-                mix_times.remove(item)
-        # saved_names = [c.compound_name for c in self.save_service.listCompounds()]
-        # for item in mix_times:
-        #     if item in saved_names:
-        #         download_names.append(item)
-        #     else:
-        #         filtered_items = fnmatch.filter(saved_names, item)
-        #         if len(filtered_items) == 0:
-        #             print(repr(item), "is not saved on Target")
-        #         else:
-        #             download_names.extend(filtered_items)
-        if len(mix_times) > 0:
-            successful_items = {i: 0 for i in mix_times}
-            for compound in self.save_service.listCompounds():
-                for item in mix_times:
-                    if item == compound.compound_name:
-                        download_names.append(compound.compound_name)
-                        successful_items[item] += 1
-                        break
-                    else:
-                        if fnmatch.fnmatch(compound.compound_name, item):
-                            download_names.append(compound.compound_name)
-                            successful_items[item] += 1
-                            break
-            for item, count in successful_items.items():
-                if count == 0:
-                    print(repr(item), "is not saved on Target")
-
-        # download_names = list(set(download_names))
-
-        if self.namespace.target == '-' and len(download_names) > 1:
-            self.download_parser.error('cannot download and write multiple items to stdout')
-            return
-
-        for item in download_names:
-            if self.namespace.target == '-':
-                f = sys.stdout.buffer
-                with TqdmUpTo(  # desc='uploading "' + path + '"',# as "' + keyname + '"',
-                        unit='Bytes',
-                        unit_scale=True,
-                        disable=self.namespace.silent) as progressreporter:
-                    data_generator = self.save_service.loadCompound(item,
-                                                                    progressreporter=progressreporter
-                                                                    )
-                    for d in data_generator:
-                        f.write(d)
-                continue
-
-            target = os.path.join(self.namespace.target, item)
-            target_dir = os.path.dirname(target)
-            if os.sep == '\\':
-                target = target.replace('/', '\\')
-                target_dir = target_dir.replace('/', '\\')
-            if item.endswith('/'):
-                if not os.path.exists(target_dir):
-                    os.makedirs(target_dir)
-                    print("downloaded Directory", item, "to", target_dir)
-                else:
-                    if self.namespace.verbose:
-                        print("skipping existing Directory", item, '@', target_dir)
-            elif not item.endswith('/'):
-                if os.path.exists(target) and not self.namespace.overwrite:
-                    # if self.namespace.verbose:
-                    print("skipping existing File", item, '@', target)
-                    continue
-                if not os.path.exists(target_dir):
-                    os.makedirs(target_dir)
-                with open(target, 'wb') as f:
-                    print('downloading "' + item + '" ')
-                    # bar = TimeRemainingBar()
-                    # progressreporter = ProgressReporter(
-                    #     widgetProgressCallback=lambda p, t, c: bar.progress(p, postCountdown=' (' + str(
-                    #         int(c)) + ' of ' + str(
-                    #         int(t)) + ' Fragments)'))
-                    with TqdmUpTo(  # desc='uploading "' + path + '"',# as "' + keyname + '"',
-                            unit='Bytes',
-                            unit_scale=True,
-                            disable=self.namespace.silent) as progressreporter:
-                        data_generator = self.save_service.loadCompound(item,
-                                                                        progressreporter=progressreporter
-                                                                        )
-                        for d in data_generator:
-                            f.write(d)
-                    # bar.finalize()
-            else:
-                raise Exception(repr(item))
 
     # noinspection DuplicatedCode
     def runList(self):
@@ -1309,7 +1233,7 @@ class ImageSaverApp(object):
                     self._set_frag_cache_on_upload_callback(progressreporter)
                     self.save_service.optimizeResourceSpace(unused_percentage=self.namespace.optimize_space,
                                                             progressreporter=progressreporter)
-            elif self.namespace.optimize_fullness:
+            elif self.namespace.optimize_fullness is not None:
                 with TqdmUpTo(desc='removing Fragments',
                               unit='Fragment',
                               unit_scale=True,
@@ -1318,12 +1242,15 @@ class ImageSaverApp(object):
                                                      keep_resources=True,
                                                      keep_unreferenced_resources=True,
                                                      progressreporter_fragments=progressreporter_fragments)
-                with TqdmUpTo(desc='optimizing Resource contents',
+                if self.namespace.optimize_fullness == -1:
+                    self.namespace.optimize_fullness = None
+                with TqdmUpTo(desc='combining Resource contents',
                               unit='Resource',
                               unit_scale=True,
                               disable=self.namespace.silent) as progressreporter:
                     self._set_frag_cache_on_upload_callback(progressreporter)
-                    self.save_service.optimizeResourceUsage(progressreporter=progressreporter)
+                    self.save_service.combineResourceSpace(fill_percentage=self.namespace.optimize_fullness,
+                                                           progressreporter=progressreporter)
             elif self.namespace.defragment:
                 with TqdmUpTo(desc='removing Fragments',
                               unit='Fragment',
@@ -1339,10 +1266,7 @@ class ImageSaverApp(object):
                               disable=self.namespace.silent) as progressreporter:
                     self._set_frag_cache_on_upload_callback(progressreporter)
                     self.save_service.defragmentResources(progressreporter=progressreporter)
-                # self.save_service.optimizeResourceSpace()
-                # self.save_service.collectGarbage(keep_fragments=True,
-                #                                  keep_resources=self.namespace.keep_resources,
-                #                                  keep_unreferenced_resources=True)
+
             else:
                 with TqdmUpTo(desc='removing Fragments',
                               unit='Fragment',
@@ -1383,13 +1307,6 @@ class ImageSaverApp(object):
             else:
                 for mix_item in mix_items:
                     for match in self.is_fs.glob(mix_item):
-                        # if self.is_fs.isdir(match.path):
-                        #     for path in itertools.chain(self.is_fs.walk.files(match.path),
-                        #                                 self.is_fs.walk.dirs(match.path)):
-                        #         if self._is_skippable_exclude_list(path, self.namespace.exclude):
-                        #             continue
-                        #         matching_names.append(path)
-                        # else:
                         match_path = match.path  # type: str
                         if match_path.endswith('/'):
                             match_path = match_path[:-1]
@@ -1408,24 +1325,6 @@ class ImageSaverApp(object):
                     self.save_service.deleteCompound(name)
                 except CompoundNotExistingException:
                     progressreporter.write('compound ' + name + ' is missing')
-        # else:
-        #     removable_paths = []
-        #     for name in matching_names:
-        #         if self.is_fs.isdir(name):
-        #             removable_paths.extend(list(self.is_fs.walk(name).dirs()))
-        #         else:
-        #             removable_paths.append(name)
-        #     with TqdmUpTo(matching_names, desc='removing Paths',
-        #                   unit='Path',
-        #                   unit_scale=True,
-        #                   disable=self.namespace.silent,
-        #                   total=len(matching_names)) as progressreporter:
-        #         for name in progressreporter:
-        #             progressreporter.write('removing ' + name)
-        #             if self.is_fs.isdir(name):
-        #                 self.is_fs.removetree(name)
-        #             else:
-        #                 self.is_fs.remove(name)
 
     def runCheck(self):
         self.save_service.checkStorageConsistency()
@@ -1442,33 +1341,19 @@ class ImageSaverApp(object):
                           disable=self.namespace.silent
                           ) as progressreporter:
                 self.save_service.checkStorageConsistencyByStorageContent(progressreporter)
-        if self.namespace.consistency_compounddata:
+        if self.namespace.consistency_compounddata is not None:
             with TqdmUpTo(desc='Checking Compound Data',
                           unit='Byte',
                           unit_scale=True,
                           disable=self.namespace.silent
                           ) as progressreporter:
+                if self.namespace.consistency_compounddata == '':
+                    starting_with = None
+                else:
+                    starting_with = self.namespace.consistency_compounddata
                 self._set_frag_cache_on_download_callback(progressreporter)
-                self.save_service.checkConsistencyOfAllCompounds(progressreporter)
+                self.save_service.checkConsistencyOfAllCompounds(starting_with, progressreporter)
                 self._unset_frag_cache_on_download_callback()
-
-        #
-        # ###
-        # mix_items = self.namespace.item[0]  # type: List[str]
-        # saved_names = [c.compound_name for c in self.save_service.listCompounds()]
-        #
-        # globbed_items = []
-        # for mix_item in mix_items:
-        #     filtered_items = fnmatch.filter(saved_names, mix_item)
-        #     if not filtered_items:
-        #         print(repr(mix_item), "is not saved on Target")
-        #     else:
-        #         globbed_items.extend(filtered_items)
-        # globbed_items = list(set(globbed_items))
-        #
-        # for mix_item in globbed_items:
-        #     self.save_service.deleteCompound(mix_item)
-        #     print("removed", mix_item)
 
     def runRepair(self):
         repaired, unrepairable = self.save_service.repairMetaConsistencyFragmentlessCompounds()
@@ -1490,6 +1375,13 @@ class ImageSaverApp(object):
                     self.save_service.deleteCompound(lost_compound.compound_name)
 
     def runProfile(self):
+        try:
+            with OSFS(self.PROFILES_PATH):
+                pass
+        except CreateFailed as e:
+            print('Profiles Directory does not exist: ' + str(e))
+            exit(1)
+            return
         if self.namespace.list:
             with OSFS(self.PROFILES_PATH) as profiles_dir:
                 for f in profiles_dir.listdir('/'):
@@ -1497,7 +1389,7 @@ class ImageSaverApp(object):
                     print(f)
         elif self.namespace.print:
             with self._config_file('r') as f:
-                profile_text = f.read()
+                profile_text = cast(str, f.read())
             if not profile_text.endswith('\n'):
                 profile_text += os.linesep
             print(profile_text)
@@ -1525,6 +1417,36 @@ class ImageSaverApp(object):
                         print('currently loaded profile:', f)
                         return
                 print("unknown profile loaded")
+
+    def runArchive(self):
+        archive_name = self.namespace.archive_name
+        if self.namespace.resource_size:
+            resource_size = self.namespace.resource_size
+        else:
+            resource_size = self.storage.getMaxSupportedResourceSize()
+
+        storage_dir = "./{0}/storage".format(archive_name)
+        meta_dir = "./{0}/meta".format(archive_name)
+        meta_file = "./{0}/meta/isl_meta.sqlite".format(archive_name)
+
+        default_config = """[Storage]
+type = local
+depth = 1
+max_items = 100
+directory = {0}
+extension = bin
+wrap_type = pass
+max_resource_size = {1}
+
+[Meta]
+type = file
+path = {2}""".format(storage_dir, resource_size, meta_file)
+
+        with OSFS('.') as cwd:
+            cwd.writetext(archive_name + '.conf', default_config)
+            cwd.makedirs(storage_dir, recreate=True)
+            cwd.makedirs(meta_dir, recreate=True)
+            cwd.touch(meta_file)
 
     def runFTP(self):
         from ImageSaverLib.FTPServer import serve_fs
@@ -1631,23 +1553,39 @@ class ImageSaverApp(object):
     def _set_frag_cache_on_download_callback(self, progressreporter):
         # type: (TqdmUpTo) -> None
         if not self.namespace.dryrun and self.namespace.verbose:
-            self.save_service.fragment_cache.onDownload = lambda res: progressreporter.write(
-                "Downloading Resource ("
-                + humanfriendly.format_size(res.resource_size)
-                + ") ...",
-                file=sys.stderr
-            )
-
-    def _set_frag_cache_on_download_printer(self):
-        # type: () -> None
-        if not self.namespace.dryrun:
-            if not self.namespace.silent and self.namespace.verbose:
-                self.save_service.fragment_cache.onDownload = lambda res: print(
+            if self.namespace.debug:
+                self.save_service.fragment_cache.onDownload = lambda res: progressreporter.write(
+                    "Downloading Resource " + res.resource_name + " ("
+                    + humanfriendly.format_size(res.resource_size)
+                    + ") ...",
+                    file=sys.stderr
+                )
+            else:
+                self.save_service.fragment_cache.onDownload = lambda res: progressreporter.write(
                     "Downloading Resource ("
                     + humanfriendly.format_size(res.resource_size)
                     + ") ...",
                     file=sys.stderr
                 )
+
+    def _set_frag_cache_on_download_printer(self):
+        # type: () -> None
+        if not self.namespace.dryrun:
+            if not self.namespace.silent and self.namespace.verbose:
+                if self.namespace.debug:
+                    self.save_service.fragment_cache.onDownload = lambda res: print(
+                        "Downloading Resource " + res.resource_name + " ("
+                        + humanfriendly.format_size(res.resource_size)
+                        + ") ...",
+                        file=sys.stderr
+                    )
+                else:
+                    self.save_service.fragment_cache.onDownload = lambda res: print(
+                        "Downloading Resource ("
+                        + humanfriendly.format_size(res.resource_size)
+                        + ") ...",
+                        file=sys.stderr
+                    )
             else:
                 self.save_service.fragment_cache.onDownload = lambda res: None
 
