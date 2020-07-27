@@ -437,6 +437,9 @@ class FragmentCache(object):
             if empty is False:
                 if not self.resource_packer.checkPackagesReachMinimumFillLevel(resources, self.resource_size,
                                                                                self.resource_minimum_filllevel):
+                    print(self.resource_size, self.resource_minimum_filllevel, file=sys.stderr)
+                    for i in resources:
+                        print(list(i.values()), file=sys.stderr)
                     print(
                         "unable to flush fragment cache without forceful emptying, all fragment packets would not reach "
                         "the desired minimum resource fill level. "
@@ -539,7 +542,16 @@ class ResourcePacker(object):
         # type: (List[Dict[Fragment, FragmentSize]], ResourceSize, float) -> bool
         if minimum_fill_level > 1.0:
             raise ValueError("fill level greater than 100% | 1.0")
-        return any((sum(packet.values()) / resource_size >= minimum_fill_level for packet in packets))
+        if len(packets) == 2 and len(packets[1]) == 1 and (
+                sum(packets[0].values()) + sum(packets[1].values()) > resource_size
+                and
+                sum(packets[0].values()) / resource_size < minimum_fill_level
+        ):
+            # edge case where fragment cache was pushed over the resource_size limit with the last fragment (in
+            # packets[1]), however the other previous fragments combined can not reach the desired minimum_fill_level
+            # occurrs with FILLING-mode
+            return True
+        return any(sum(packet.values()) / resource_size >= minimum_fill_level for packet in packets)
 
     def _get_binpacked_resources(self, resource_size, fragments):
         # type: (ResourceSize, Iterable[Fragment]) -> List[Dict[Fragment, FragmentSize]]
