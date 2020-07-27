@@ -25,8 +25,7 @@ from ImageSaverLib.ImageSaverLib import ImageSaver
 from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
 from ImageSaverLib.MetaDB.Types.Compound import Compound
 from ImageSaverLib.Storage.StorageInterface import StorageInterface
-
-from ImageSaverLib.Storage.VerboseStorage import SizableVerboseStorage
+from ImageSaverLib.Storage.VerboseStorage import VerboseStorage
 
 
 class Actions(object):
@@ -43,6 +42,7 @@ class Actions(object):
     profile = 'profile'
     archive = 'archive'
 
+# region argparse type checkers
 
 def checkIsPercentage(s):
     if '%' in s:
@@ -105,6 +105,8 @@ def fromBytes(b):
 
 def toAbsPath(s):
     return os.path.abspath(os.path.normpath(os.path.expanduser(s)))
+
+# endregion
 
 
 class ImageSaverApp(object):
@@ -322,6 +324,7 @@ class ImageSaverApp(object):
     def __init__(self):
         self._meta = None  # type: Optional[MetaDBInterface]
         self._storage = None  # type: Optional[StorageInterface]
+        self._verbose_storage = None  # type: Optional[VerboseStorage]
         self._save_service = None  # type: Optional[ImageSaver]
         self._is_fs = None  # type: Optional[ImageSaverFS]
         self._config_parser_obj = None  # type: Optional[ConfigParser]
@@ -378,6 +381,14 @@ class ImageSaverApp(object):
             if self.namespace.dryrun:
                 self._save_service.fragment_cache.cache_last_downloaded_resource = False
             return self._save_service
+
+    @property
+    def verbose_storage(self):
+        if not self._storage:
+            id(self.storage)
+        assert self._verbose_storage
+        return self._verbose_storage
+
 
     @property
     def storage(self):
@@ -443,6 +454,8 @@ class ImageSaverApp(object):
                 storage = RedundantStorage(policy, redundancy, *storages, meta_dir=meta_dir)
             else:
                 storage = storage_builder.build_from_config(parser)
+            storage = VerboseStorage(storage, self.namespace.verbose)
+            self._verbose_storage = storage
             if self.namespace.dryrun:
                 self._storage = VoidStorage()
                 if not self.namespace.neutral_dryrun:
@@ -1350,7 +1363,9 @@ class ImageSaverApp(object):
                 if self.namespace.consistency_compounddata == '':
                     starting_with = None
                 else:
-                    starting_with = self.namespace.consistency_compounddata
+                    starting_with = self.namespace.consistency_compounddata  # type: Optional[str]
+                    if not starting_with.startswith('/'):
+                        starting_with = '/' + starting_with
                 self._set_frag_cache_on_download_callback(progressreporter)
                 self.save_service.checkConsistencyOfAllCompounds(starting_with, progressreporter)
                 self._unset_frag_cache_on_download_callback()
@@ -1466,13 +1481,6 @@ path = {2}""".format(storage_dir, resource_size, meta_file)
                     print("flushing saver and closing")
                     saver.flush()
 
-    @staticmethod
-    def _winPath2ubuPath(winpath):
-        # type: (str) -> str
-        d, p = winpath.split(':')
-        ubupath = '/' + d + p.replace('\\', '/')
-        return ubupath
-
     def _is_skippable(self, path, excludelist):
         # type: (str, List[str]) -> bool
         try:
@@ -1499,102 +1507,54 @@ path = {2}""".format(storage_dir, resource_size, meta_file)
                     return True
         return False
 
-    @staticmethod
-    def getRelativeFilesFromDir(directory):
-        paths = []
-        directory_abs_path = os.path.abspath(directory)
-        if directory == '.':
-            basepath = ''
-        else:
-            basepath = os.path.basename(directory)
-        for (dirpath, x, filenames) in os.walk(directory_abs_path):
-            # print dirpath, filenames
-            for f in filenames:
-                rel_path = os.path.join(dirpath, f).replace(directory_abs_path, '')
-                if os.sep == '\\':
-                    rel_path = rel_path.replace('\\', '/')
-                if rel_path.startswith('/'):
-                    rel_path = rel_path[1:]
-                rel_path = os.path.join(basepath, rel_path)
-                if os.sep == '\\':
-                    rel_path = rel_path.replace('\\', '/')
-                if rel_path:
-                    paths.append((os.path.join(dirpath, f), rel_path))
-
-        return paths
-
-    @staticmethod
-    def getRelativeDirsFromDir(directory):
-        paths = []
-        directory_abs_path = os.path.abspath(directory)
-
-        if directory == '.':
-            basepath = ''
-        else:
-            basepath = os.path.basename(directory)
-        for (dirpath, x, filenames) in os.walk(directory_abs_path):
-            # print dirpath, filenames
-            rel_path = dirpath.replace(directory_abs_path, '')
-            if os.sep == '\\':
-                rel_path = rel_path.replace('\\', '/')
-            if rel_path.startswith('/'):
-                rel_path = rel_path[1:]
-            rel_path = os.path.join(basepath, rel_path)
-            if os.sep == '\\':
-                rel_path = rel_path.replace('\\', '/')
-            if rel_path:
-                paths.append((dirpath, rel_path))
-
-        return paths
-
     def _unset_frag_cache_on_download_callback(self):
-        self.save_service.fragment_cache.onDownload = None
+        self.verbose_storage.on_loadRessource = lambda res_name, res_size: None
 
     def _set_frag_cache_on_download_callback(self, progressreporter):
         # type: (TqdmUpTo) -> None
-        if not self.namespace.dryrun and self.namespace.verbose:
+        if self.namespace.verbose:
             if self.namespace.debug:
-                self.save_service.fragment_cache.onDownload = lambda res: progressreporter.write(
-                    "Downloading Resource " + res.resource_name + " ("
-                    + humanfriendly.format_size(res.resource_size)
+                self.verbose_storage.on_loadRessource = lambda res_name, res_size: progressreporter.write(
+                    "Downloading Resource " + res_name + " ("
+                    + humanfriendly.format_size(res_size)
                     + ") ...",
                     file=sys.stderr
                 )
             else:
-                self.save_service.fragment_cache.onDownload = lambda res: progressreporter.write(
+                self.verbose_storage.on_loadRessource = lambda res_name, res_size: progressreporter.write(
                     "Downloading Resource ("
-                    + humanfriendly.format_size(res.resource_size)
+                    + humanfriendly.format_size(res_size)
                     + ") ...",
                     file=sys.stderr
                 )
 
     def _set_frag_cache_on_download_printer(self):
         # type: () -> None
-        if not self.namespace.dryrun:
-            if not self.namespace.silent and self.namespace.verbose:
-                if self.namespace.debug:
-                    self.save_service.fragment_cache.onDownload = lambda res: print(
-                        "Downloading Resource " + res.resource_name + " ("
-                        + humanfriendly.format_size(res.resource_size)
-                        + ") ...",
-                        file=sys.stderr
-                    )
-                else:
-                    self.save_service.fragment_cache.onDownload = lambda res: print(
-                        "Downloading Resource ("
-                        + humanfriendly.format_size(res.resource_size)
-                        + ") ...",
-                        file=sys.stderr
-                    )
+        if not self.namespace.silent and self.namespace.verbose:
+            if self.namespace.debug:
+                self.verbose_storage.on_loadRessource = lambda res_name, res_size: print(
+                    "Downloading Resource " + res_name + " ("
+                    + humanfriendly.format_size(res_size)
+                    + ") ...",
+                    file=sys.stderr
+                )
             else:
-                self.save_service.fragment_cache.onDownload = lambda res: None
+                self.verbose_storage.on_loadRessource = lambda res_name, res_size: print(
+                    "Downloading Resource ("
+                    + humanfriendly.format_size(res_size)
+                    + ") ...",
+                    file=sys.stderr
+                )
+        else:
+            self.verbose_storage.on_loadRessource = lambda res_name, res_size: None
 
     def _unset_frag_cache_on_upload_callback(self):
         self.save_service.fragment_cache.onUpload = None
 
     def _set_frag_cache_on_upload_callback(self, progressreporter):
         # type: (TqdmUpTo) -> None
-        if not self.namespace.dryrun and self.namespace.verbose:
+        # if not self.namespace.dryrun and self.namespace.verbose:
+        if self.namespace.verbose:
             self.save_service.fragment_cache.onUpload = lambda res_size, frag_count: progressreporter.write(
                 "Uploading Resource ("
                 + humanfriendly.format_size(res_size)
@@ -1606,18 +1566,18 @@ path = {2}""".format(storage_dir, resource_size, meta_file)
 
     def _set_frag_cache_on_upload_printer(self):
         # type: () -> None
-        if not self.namespace.dryrun:
-            if not self.namespace.silent and self.namespace.verbose:
-                self.save_service.fragment_cache.onUpload = lambda res_size, frag_count: print(
-                    "Uploading Resource ("
-                    + humanfriendly.format_size(res_size)
-                    + ") containing "
-                    + str(frag_count)
-                    + (" Fragments..." if frag_count > 1 else " Fragment..."),
-                    file=sys.stderr
-                )
-            else:
-                self.save_service.fragment_cache.onUpload = lambda res_size, frag_count: None
+        # if not self.namespace.dryrun:
+        if not self.namespace.silent and self.namespace.verbose:
+            self.save_service.fragment_cache.onUpload = lambda res_size, frag_count: print(
+                "Uploading Resource ("
+                + humanfriendly.format_size(res_size)
+                + ") containing "
+                + str(frag_count)
+                + (" Fragments..." if frag_count > 1 else " Fragment..."),
+                file=sys.stderr
+            )
+        else:
+            self.save_service.fragment_cache.onUpload = lambda res_size, frag_count: None
 
     def _check_namespace_fragment_size(self):
         if self.namespace.fragment_size:
