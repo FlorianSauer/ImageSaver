@@ -190,8 +190,9 @@ class ImageSaverFS(FS):
     def setinfo(self, path, info):
         raise NotImplementedError("Setting Metadata for a Compound is not supported with ImageSaver")
 
+    # region override methods that can be solved with ImageSaver internals, like copying, moving or hash calculating
+
     def hash(self, path, name):
-        # print('ImageSaverFS.hash', path, name)
         if name.lower() == 'sha256':
             with self._lock:
                 abs_path = self.validatepath(path)
@@ -205,6 +206,35 @@ class ImageSaverFS(FS):
             return super().hash(path, name)
 
     def copy(self, src_path, dst_path, overwrite=False):
+        if not overwrite and self.exists(dst_path):
+            raise fs.errors.DestinationExists(dst_path)
         src_path = self.validatepath(src_path)
         dst_path = self.validatepath(dst_path)
         self._saver.copyCompound(src_path, dst_path, overwrite)
+
+    def move(self, src_path, dst_path, overwrite=False):
+        if src_path == dst_path:
+            return
+        if not overwrite and self.exists(dst_path):
+            raise fs.errors.DestinationExists(dst_path)
+        if self.getinfo(src_path).is_dir:
+            raise fs.errors.FileExpected(src_path)
+        src_path = self.validatepath(src_path)
+        dst_path = self.validatepath(dst_path)
+        if not self.exists(fs.path.dirname(dst_path)):
+            raise fs.errors.ResourceNotFound(fs.path.dirname(dst_path))
+        self._saver.renameCompound(src_path, dst_path)
+
+    def movedir(self, src_path, dst_path, create=False):
+        if src_path == dst_path:
+            return
+        if not create and not self.exists(dst_path):
+            raise fs.errors.ResourceNotFound(dst_path)
+        src_path = self.validatepath(src_path)
+        dst_path = self.validatepath(dst_path)
+        for compound in self._saver.listCompounds(starting_with=src_path):
+            src_name = compound.compound_name
+            dst_name = src_name.replace(src_path, dst_path, 1)
+            self._saver.renameCompound(src_name, dst_name)
+
+    # endregion
