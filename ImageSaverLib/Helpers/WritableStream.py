@@ -5,11 +5,16 @@ from ImageSaverLib.Encapsulation import WrappingType, CompressionType, AutoWrapp
 from ImageSaverLib.Errors import CompoundAlreadyExistsException
 from ImageSaverLib.FragmentCache import FragmentCache
 from ImageSaverLib.Helpers import split_bytes
-from ImageSaverLib.Helpers.NotifyCounter import (AccessManager, ExclusiveAccessContext,
-                                                 ParallelMassReserver, AccessContext, MassReserver)
+from ImageSaverLib.Helpers.ControlledAccess.AccessManager import AccessManager
+from ImageSaverLib.Helpers.ControlledAccess.Context.AccessContext import AccessContext
+from ImageSaverLib.Helpers.ControlledAccess.Context.ExclusiveAccessContext import ExclusiveAccessContext
+from ImageSaverLib.Helpers.ControlledAccess.Reserver.MassReserver import MassReserver
+from ImageSaverLib.Helpers.ControlledAccess.Reserver.ParallelMassReserver import ParallelMassReserver
+from ImageSaverLib.MetaDB.Errors import NotExistingException
 from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
 from ImageSaverLib.MetaDB.Types.Compound import (CompoundName, Compound, CompoundType, CompoundSize,
-                                                 CompoundCompressionType, CompoundWrappingType, CompoundHash)
+                                                 CompoundCompressionType, CompoundWrappingType, CompoundHash,
+                                                 CompoundVersion)
 from ImageSaverLib.MetaDB.Types.CompoundFragmentMapping import SequenceIndex
 from ImageSaverLib.MetaDB.Types.Fragment import FragmentHash, FragmentPayloadSize, Fragment
 from ImageSaverLib.PendingObjectsController import PendingObjectsController
@@ -17,55 +22,52 @@ from ImageSaverLib.PendingObjectsController import PendingObjectsController
 
 def openWritableCompound(meta, fragment_cache, compound_am, fragment_am, fragment_size, wrapper, compresser, wrap_type,
                          compress_type, pending_objects, name, compound_type, overwrite=False, compound=None,
-                         append=False,
                          blocking=True, timeout=None):
-    # type: (MetaDBInterface, FragmentCache, AccessManager[CompoundName], AccessManager[FragmentHash], int, AutoWrapper, AutoCompressor, WrappingType, CompressionType, PendingObjectsController, CompoundName, CompoundType, bool, Optional[Compound], bool, bool, Optional[float]) -> WritableCompound
-    if append:
-        # Appending would require either the updating of a hash, sourced from its calculated value (not possible)
-        # or to read in all the old data to have a hash object with the correct hash-state to generate the correct
-        # overall compound hash
-        raise NotImplementedError("appending is currently not possible.")
+    # type: (MetaDBInterface, FragmentCache, AccessManager[Tuple[CompoundName, CompoundVersion]], AccessManager[FragmentHash], int, AutoWrapper, AutoCompressor, WrappingType, CompressionType, PendingObjectsController, CompoundName, CompoundType, bool, Optional[Compound], bool, Optional[float]) -> WritableCompound
     if compound:
         assert compound.compound_name == name
-    compound_reserver = ExclusiveAccessContext(compound_am, name, blocking=blocking, timeout=timeout)
+    compound_reserver = ExclusiveAccessContext(compound_am,
+                                               (name, CompoundVersion(None)),
+                                               blocking=blocking, timeout=timeout)
     fragment_reserver = ParallelMassReserver(fragment_am, blocking=blocking, timeout=timeout)
     with compound_reserver:
         with meta:
-            if compound:
+            if compound and compound.compound_id is not None:  # compound has id from db
                 meta_has_compound = True
             else:
-                if pending_objects.hasCompoundWithName(name):
+                if pending_objects.hasCompoundWithName(name):  # compound has no id and is in pending
+                    compound = pending_objects.getPendingCompoundWithName(name)
                     meta_has_compound = True
-                    meta_has_compound_is_pending = True
+                    compound_is_pending = True
                 else:
-                    meta_has_compound = meta.hasCompoundWithName(name)
-                    meta_has_compound_is_pending = False
-            if compound:
-                fragment_hashes = list(meta.getFragmentHashesNeededForCompound(compound.compound_id))
-                fragment_reserver.reserveAll(*fragment_hashes)
-            elif meta_has_compound and not overwrite:
+                    try:
+                        compound = meta.getCompoundByName(name)
+                        meta_has_compound = True
+                    except NotExistingException:
+                        meta_has_compound = False
+                        compound = None
+                    compound_is_pending = False
+            if meta_has_compound and not overwrite:
                 raise CompoundAlreadyExistsException(
                     "compound already exists (maybe different payload), not allowed to overwrite")
-            elif meta_has_compound and overwrite:
-                if meta_has_compound_is_pending:
-                    compound = pending_objects.getPendingCompoundWithName(name)
-                else:
-                    compound = meta.getCompoundByName(name)
+            if meta_has_compound and not compound_is_pending:
+                assert compound.compound_id is not None
                 fragment_hashes = list(meta.getFragmentHashesNeededForCompound(compound.compound_id))
                 fragment_reserver.reserveAll(*fragment_hashes)
-            else:
-                compound = None
+            elif meta_has_compound and compound_is_pending:
+                fragment_hashes = list(pending_objects.getFragmentHashesNeededForCompound(compound.compound_hash))
+                fragment_reserver.reserveAll(*fragment_hashes)
 
         w_c = WritableCompound(meta, fragment_cache, compound_reserver, fragment_reserver, fragment_size, wrapper,
-                               compresser, wrap_type, compress_type, pending_objects, name, compound_type, compound)
+                               compresser, wrap_type, compress_type, pending_objects, name, compound_type)
         return w_c
 
 
 class WritableCompound(BinaryIO):
 
     def __init__(self, meta, fragment_cache, compound_reserver, fragment_reserver, fragment_size, wrapper, compresser,
-                 wrap_type, compress_type, pending_objects, name, compound_type, compound=None):
-        # type: (MetaDBInterface, FragmentCache, AccessContext[CompoundName], MassReserver[FragmentHash], int, AutoWrapper, AutoCompressor, WrappingType, CompressionType, PendingObjectsController, CompoundName, CompoundType, Optional[Compound]) -> None
+                 wrap_type, compress_type, pending_objects, name, compound_type):
+        # type: (MetaDBInterface, FragmentCache, AccessContext[Tuple[CompoundName, CompoundVersion]], MassReserver[FragmentHash], int, AutoWrapper, AutoCompressor, WrappingType, CompressionType, PendingObjectsController, CompoundName, CompoundType) -> None
         pass
         self.__debug = False
         # must contain meta, fragmentcache, reserved fragments+compounds
@@ -79,7 +81,6 @@ class WritableCompound(BinaryIO):
         self._compresser = compresser
         self._wrap_type = wrap_type
         self._compress_type = compress_type
-        self._compound = compound  # optional, if given, overwrite this compound
         self._pending_objects = pending_objects
         self._name = name
         self._compound_type = compound_type
@@ -178,18 +179,6 @@ class WritableCompound(BinaryIO):
             self.flush()
             # process compound metadata
             stream_hash = CompoundHash(self._stream_hash.digest())
-            # if not self._compound:
-            #     self._pending_compound = Compound(self._name, self._compound_type, stream_hash,
-            #                                       self._stream_size,
-            #                                       CompoundWrappingType(self._wrap_type),
-            #                                       CompoundCompressionType(self._compress_type))
-            #     compound = self._pending_compound
-            # else:
-            #     self._pending_compound = Compound(self._name, self._compound_type, stream_hash,
-            #                                       self._stream_size,
-            #                                       CompoundWrappingType(self._wrap_type),
-            #                                       CompoundCompressionType(self._compress_type))
-            #     compound = self._pending_compound
             compound = Compound(self._name, self._compound_type, stream_hash,
                                 self._stream_size,
                                 CompoundWrappingType(self._wrap_type),
@@ -252,32 +241,7 @@ class WritableCompound(BinaryIO):
         else:
             fragment_data, self._fragment_data_buffer = split_bytes(self._fragment_data_buffer, self._fragment_size)
             self._fragment_data_buffer_len -= self._fragment_size
-        # _fragment_payload_size = FragmentPayloadSize(len(fragment_data))
-        # self._stream_size += _fragment_payload_size
-        # fragment_data = encapsulate(self._compresser, self._wrapper, self._compress_type, self._wrap_type,
-        #                             fragment_data)
-        # fragment_hash = FragmentHash(hashlib.sha256(fragment_data).digest())
-        # self._fragment_reserver.reserveOne(fragment_hash)
-        # fragment_size = FragmentSize(len(fragment_data))
-        # fragment_hash_in_skip_fragment_hashes = fragment_hash in self._skip_fragment_hashes
-        # # check if fragment already exists, if yes, no need to upload
-        # if fragment_hash_in_skip_fragment_hashes:
-        #     fragment = self._meta.getFragmentByPayloadHash(fragment_hash)
-        # else:
-        #     try:
-        #         fragment = self._meta.getFragmentByPayloadHash(fragment_hash)
-        #     except NotExistingException:
-        #         fragment = self._meta.makeFragment(fragment_hash, fragment_size,
-        #                                            _fragment_payload_size)
-        #         # if not, build new fragment
-        #         # build resource for upload
-        #         # upload new resource
-        #         self._pending_fragments.append(fragment)
-        #         self._pending_objects.addFragment(fragment)
-        #         self._fragment_cache.addFragment(fragment_data, fragment)
 
-        # self._skip_fragment_hashes.add(fragment_hash)
-        # self.cache_meta.makeFragmentResourceMapping(fragment.fragment_id, resource.resource_id)
         # remember fragment id and payload index
         fragment_payload_size = FragmentPayloadSize(len(fragment_data))
         fragment_data = encapsulate(self._compresser, self._wrapper, self._compress_type, self._wrap_type,
