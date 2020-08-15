@@ -2,12 +2,14 @@ import argparse
 import fnmatch
 import glob
 import hashlib
+import itertools
 import os
 import re
 import stat
 import sys
+from collections import deque
 from configparser import ConfigParser
-from typing import List, Set, Union, Optional, cast, BinaryIO, IO, TextIO
+from typing import List, Set, Union, Optional, cast, BinaryIO, IO, TextIO, Iterable
 
 import fs
 import humanfriendly
@@ -41,6 +43,7 @@ class Actions(object):
     repair = 'repair'
     profile = 'profile'
     archive = 'archive'
+    snapshot = 'snapshot'
 
 # region argparse type checkers
 
@@ -168,6 +171,9 @@ class ImageSaverApp(object):
     archive_parser = subparsers.add_parser(Actions.archive,
                                            help="Creates a local 'archive' in the current folder. a configuration file is saved under <archive name>.conf, which can be loaded with the main -c flag",
                                            allow_abbrev=False)
+    snapshot_parser = subparsers.add_parser(Actions.snapshot,
+                                            help="Creates a snapshot of a given File or Folder",
+                                            allow_abbrev=False)
 
     upload_parser.add_argument('item', action='append', help="Add the given File or Directory to the Target."
                                , nargs='+', default=[])
@@ -311,6 +317,10 @@ class ImageSaverApp(object):
     archive_parser.add_argument('-rs', '--resource-size', dest='resource_size', type=humanfriendly.parse_size,
                                 help="Changes the Resource Size to use for the generated config. "
                                      "If not specified, uses the resource size of the current storage")
+
+    snapshot_parser.add_argument('item', action='append', help="Snapshot the given Item.",
+                                 # nargs='+',
+                                 default=[])
     # endregion
 
     namespace = argparser.parse_args(sys.argv[1:])
@@ -388,7 +398,6 @@ class ImageSaverApp(object):
             id(self.storage)
         assert self._verbose_storage
         return self._verbose_storage
-
 
     @property
     def storage(self):
@@ -603,6 +612,8 @@ class ImageSaverApp(object):
             self.runProfile()
         elif self.namespace.action == Actions.archive:
             self.runArchive()
+        elif self.namespace.action == Actions.snapshot:
+            self.runSnapshot()
         else:
             self.argparser.print_help()
 
@@ -1163,6 +1174,8 @@ class ImageSaverApp(object):
         with self.save_service:
             print("saved Compounds                                ",
                   self.save_service.getTotalCompoundCount())
+            print("saved Snapshots                                ",
+                  self.save_service.getSnapshotCount())
             print("saved Compounds (Files)                        ",
                   self.save_service.getTotalCompoundCount(with_type=Compound.FILE_TYPE))
             print("saved Compounds (Directories)                  ",
@@ -1480,6 +1493,44 @@ path = {2}""".format(storage_dir, resource_size, meta_file)
                 else:
                     print("flushing saver and closing")
                     saver.flush()
+
+    def runSnapshot(self):
+        item_count = len(self.namespace.item)
+        for item_index, item in enumerate(self.namespace.item):
+            item_index += 1
+            if self.is_fs.exists(item):
+                if self.is_fs.isdir(item):
+                    walk_files = list(self.is_fs.walk.files(item))
+                    with TqdmUpTo(walk_files, desc='({0} of {1}) snapshotting Compounds '.format(item_index, item_count),
+                                  unit='Compound',
+                                  unit_scale=True,
+                                  disable=self.namespace.silent,
+                                  total=len(walk_files)) as progressreporter:
+                        for filepath in progressreporter:
+                            progressreporter.write('creating snapshot of ' + filepath)
+                            self.is_fs.snapshot(filepath)
+                else:
+                    print('({0} of {1}) creating snapshot of {2}'.format(item_index, item_count, item))
+                    self.is_fs.snapshot(item)
+            else:
+                file_matches = [m for m in self.is_fs.glob(item) if m.info.is_file]
+                with TqdmUpTo(file_matches, desc='({0} of {1}) snapshotting Compounds '.format(item_index, item_count),
+                              unit='Compound',
+                              unit_scale=True,
+                              disable=self.namespace.silent,
+                              total=len(file_matches)) as progressreporter:
+                    for match in progressreporter:
+                        progressreporter.write('creating snapshot of ' + match.path)
+                        self.is_fs.snapshot(match.path)
+
+    def _count_iter_items(self, iterable):
+        # type: (Iterable) -> int
+        """
+        Consume an iterable not reading it into memory; return the number of items.
+        """
+        counter = itertools.count()
+        deque(zip(iterable, counter), maxlen=0)  # (consume at C speed)
+        return next(counter)
 
     def _is_skippable(self, path, excludelist):
         # type: (str, List[str]) -> bool
