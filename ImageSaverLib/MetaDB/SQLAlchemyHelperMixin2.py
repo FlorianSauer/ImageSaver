@@ -2,7 +2,7 @@ import traceback
 from contextlib import contextmanager
 from sqlite3 import Connection as SQLite3Connection
 from threading import RLock
-from typing import TypeVar, Generic, Type, List, Optional, Dict, Any, Generator
+from typing import TypeVar, Generic, Type, List, Optional, Dict, Any, Generator, cast
 
 from sqlalchemy import engine, event
 # noinspection PyProtectedMember
@@ -74,7 +74,7 @@ class ExposableGeneratorQuery(object):
 class SQLAlchemyHelperMixin(Generic[M]):
 
     def __init__(self, session):
-        # type: (sessionmaker) -> None
+        # type: (scoped_session) -> None
         self.sessionmaker = session
         # noinspection PyTypeChecker
         self._session_lock = RLock()
@@ -143,15 +143,13 @@ class SQLAlchemyHelperMixin(Generic[M]):
         """
 
         :param model: class to create or get
-        :param init_args: the values the instance should have if new generated
+        :param init_args: the values the instance should have if new generated. overloads search arguments, that are
+        not ClauseElements
         :param search_kwargs: search values
         :return:
         """
-        # traceback.print_exc()
-        # print(model, init_args, search_kwargs)
         instance = session.query(model).filter_by(**search_kwargs).first()
         if instance:
-            # self.session.expunge(instance)
             session.expunge_all()
             return instance
         else:
@@ -165,10 +163,47 @@ class SQLAlchemyHelperMixin(Generic[M]):
                 # self.session.expunge(instance)
             except IntegrityError:
                 session.rollback()
-                # print("!!!ROLLBACK!!! _get_or_create")
                 raise AlreadyExistsException("cannot create new model " + model.__name__ + " by " + repr(params))
             session.expunge_all()
             return instance
+
+    def _bulk_get_or_create(self, session, model, batch_init_args, instance_order, **search_kwargs):
+        # type: (Session, Type[M], List[Dict[str, Any]], List[Dict[str, Any]], **ClauseElement) -> List[M]
+        """
+        same as _get_or_create but optimized for bulk operation.
+        Init args MUST be given
+        search kwargs are ClauseElements, and are not used for instance creating
+        :param instance_order: a list of dicts, which have the instance attribute names as keys.
+        """
+        if len(batch_init_args) != len(instance_order):
+            raise ValueError('init args and instance args must be equally large')
+        instances = cast(List[M], session.query(model).filter_by(**search_kwargs).all())
+        return_instances = []
+        missing_instances = []
+        for init_args, instance_order_dict in zip(batch_init_args, instance_order):
+            found = False
+            for instance in instances:
+                if all((getattr(instance, a_n) == a_v for a_n, a_v in instance_order_dict.items())):
+                    return_instances.append(instance)
+                    found = True
+                    break
+                else:
+                    continue
+            if not found:
+                new_instance = model(**init_args)
+                return_instances.append(new_instance)
+                missing_instances.append((new_instance, init_args))
+        for missing_instance, params in missing_instances:
+            session.begin_nested()
+            try:
+                session.add(missing_instance)
+                session.commit()
+                # self.session.expunge(instance)
+            except IntegrityError:
+                session.rollback()
+                raise AlreadyExistsException("cannot create new model " + model.__name__ + " by " + repr(params))
+            session.expunge_all()
+        return return_instances
 
     def _create_or_update(self, session, model, get_by, update_to, **kwargs):
         # type: (Session, Type[M], List[BinaryExpression], Dict[InstrumentedAttribute, Any], **Any) -> M
@@ -375,6 +410,7 @@ class SQLAlchemyHelperMixin(Generic[M]):
     def _get_one(self, session, model, *args):
         # type: (Session, Type[M], *BinaryExpression) -> M
         try:
+            # print(session.query(model).filter(*args).all())
             instance = session.query(model).filter(*args).one()
             # self.session.expunge(instance)
             return instance
