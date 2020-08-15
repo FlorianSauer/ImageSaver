@@ -49,10 +49,6 @@ class ImageSaverFS(FS):
         finally:
             return super().__exit__(exc_type, exc_value, traceback)
 
-    def flush(self):
-        with self._lock:
-            self._saver.flush()
-
     def close(self):
         with self._lock:
             self._saver.flush()
@@ -163,7 +159,7 @@ class ImageSaverFS(FS):
             if compound.compound_type != Compound.FILE_TYPE:
                 raise fs.errors.FileExpected(abs_path)
             try:
-                self._saver.deleteCompound(abs_path)
+                self._saver.deleteCompound(abs_path, with_snapshots=True)
             except CompoundNotExistingException:
                 pass
 
@@ -236,5 +232,30 @@ class ImageSaverFS(FS):
             src_name = compound.compound_name
             dst_name = src_name.replace(src_path, dst_path, 1)
             self._saver.renameCompound(src_name, dst_name)
+
+    # endregion
+
+    # region non-standard methods
+
+    def flush(self):
+        with self._lock:
+            self._saver.flush()
+
+    # def snapshotDir(self, path, recursive):
+    #     path = self.validatepath(path)
+    #     with self._lock:
+    #         info = self.getinfo(path)
+    #         if not info.is_dir:
+    #             raise fs.errors.DirectoryExpected(path)
+    #         for compound in self._saver.listCompounds(starting_with=path, include_snapshots=False):
+    #             self._saver.snapshotCompound(compound.compound_name)
+
+    def snapshot(self, path):
+        path = self.validatepath(path)
+        with self._lock:
+            info = self.getinfo(path)
+            if not info.is_file:
+                raise fs.errors.FileExpected(path)
+            self._saver.snapshotCompound(path)
 
     # endregion
