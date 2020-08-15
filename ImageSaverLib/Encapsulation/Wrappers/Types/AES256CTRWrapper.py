@@ -1,35 +1,47 @@
-from Crypto.Cipher import AES
-# noinspection PyProtectedMember
-from Crypto.Util import Counter
+import hashlib
+
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import algorithms, modes, Cipher, CipherContext
 
 from ..BaseWrapper import BaseWrapper
-
-TEST_KEY = 'f7ab933b57af750f60a69fac250c27dee3cfd16513491446c2ddcaf8e792fc29'
 
 
 class AES256CTRWrapper(BaseWrapper):
     _wrapper_type = 'aes256'
 
-    def __init__(self, key=bytes.fromhex(TEST_KEY)):
+    def __init__(self, key):
         # type: (bytes) -> None
         if len(key) != 32:
             raise ValueError("key size must be 32 bytes")
         self._key = key
+        self._nonce = hashlib.md5(self._key).digest()
+
+    def _getCipher(self):
+        # type: () -> Cipher
+        algorithm = algorithms.AES(self._key)
+        mode = modes.CTR(self._nonce)
+        return Cipher(algorithm, mode, default_backend())
+
+    def _getEncryptor(self):
+        # type: () -> CipherContext
+        return self._getCipher().encryptor()
+
+    def _getDecryptor(self):
+        # type: () -> CipherContext
+        return self._getCipher().decryptor()
 
     def encrypt_once(self, s):
         # type: (bytes) -> bytes
-        aes = AES.new(self._key, AES.MODE_CTR, counter=Counter.new(128))
-        return aes.encrypt(s)
+        encryptor = self._getEncryptor()
+        return encryptor.update(s) + encryptor.finalize()
 
     def decrypt_once(self, s):
         # type: (bytes) -> bytes
-        aes = AES.new(self._key, AES.MODE_CTR, counter=Counter.new(128))
-        return aes.decrypt(s)
+        decryptor = self._getDecryptor()
+        return decryptor.update(s) + decryptor.finalize()
 
     def wrap(self, data):
-        # print(self.__class__.__name__, "wrapping", len(data), "bytes")
         return self.encrypt_once(data)
 
     def unwrap(self, data):
-        # print(self.__class__.__name__, "unwrapping", len(data), "bytes")
         return self.decrypt_once(data)

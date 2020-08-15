@@ -15,7 +15,6 @@ Cython
 wrapt
 psycopg2
 pysmb
-pycryptodome
 cachetools
 fs
 google_auth_oauthlib
