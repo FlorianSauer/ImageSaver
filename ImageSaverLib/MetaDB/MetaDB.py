@@ -3,7 +3,8 @@ from typing import List, Tuple, Optional, Iterable, Any
 
 from ImageSaverLib.Helpers.SizedGenerator import SizedGenerator
 from ImageSaverLib.MetaDB.Types.Compound import (Compound, CompoundName, CompoundID, CompoundType, CompoundHash,
-                                                 CompoundSize, CompoundWrappingType, CompoundCompressionType)
+                                                 CompoundSize, CompoundWrappingType, CompoundCompressionType,
+                                                 CompoundVersion)
 from ImageSaverLib.MetaDB.Types.CompoundFragmentMapping import SequenceIndex
 from ImageSaverLib.MetaDB.Types.Fragment import Fragment, FragmentID, FragmentHash, FragmentSize, FragmentPayloadSize
 # from ImageSaverLib2.MetaDB.Types.Payload import Payload, PayloadHash, PayloadSize, PayloadID
@@ -26,13 +27,13 @@ class MetaDBInterface(ABC):
         return self
 
     @abstractmethod
-    def getCompoundByName(self, compound_name):
-        # type: (CompoundName) -> Compound
+    def getCompoundByName(self, compound_name, compound_version=CompoundVersion(None)):
+        # type: (CompoundName, CompoundVersion) -> Compound
         pass
 
     @abstractmethod
-    def getCompoundByHash(self, compound_hash):
-        # type: (CompoundHash) -> Compound
+    def getCompoundByHash(self, compound_hash, compound_version=CompoundVersion(None)):
+        # type: (CompoundHash, CompoundVersion) -> Compound
         pass
 
     @abstractmethod
@@ -76,6 +77,11 @@ class MetaDBInterface(ABC):
         pass
 
     @abstractmethod
+    def makeSnapshottedCompound(self, compound):
+        # type: (Compound) -> Compound
+        pass
+
+    @abstractmethod
     def updateCompound(self, name, compound_type, compound_hash, compound_size, wrapping_type, compression_type):
         # type: (CompoundName, CompoundType, CompoundHash, CompoundSize, CompoundWrappingType, CompoundCompressionType) -> Compound
         """
@@ -89,13 +95,13 @@ class MetaDBInterface(ABC):
     #     pass
 
     @abstractmethod
-    def hasCompoundWithName(self, name):
-        # type: (CompoundName) -> bool
+    def hasCompoundWithName(self, name, version=CompoundVersion(None)):
+        # type: (CompoundName, CompoundVersion) -> bool
         pass
 
     @abstractmethod
-    def hasCompoundWithHash(self, compound_hash):
-        # type: (CompoundHash) -> bool
+    def hasCompoundWithHash(self, compound_hash, compound_version=CompoundVersion(None)):
+        # type: (CompoundHash, CompoundVersion) -> bool
         pass
 
     # @abstractmethod
@@ -119,8 +125,8 @@ class MetaDBInterface(ABC):
     #     pass
 
     @abstractmethod
-    def getAllCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None, slash_count=None, min_size=None):
-        # type: (Optional[CompoundType], bool, Optional[str], Optional[str], Optional[int], Optional[int]) -> SizedGenerator[Compound]
+    def getAllCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None, slash_count=None, min_size=None, include_snapshots=False):
+        # type: (Optional[CompoundType], bool, Optional[str], Optional[str], Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
         pass
 
     @abstractmethod
@@ -134,12 +140,22 @@ class MetaDBInterface(ABC):
         pass
 
     @abstractmethod
+    def getAllCompoundNamesWithVersion(self, include_snapshots=False):
+        # type: (bool) -> SizedGenerator[Tuple[CompoundName, CompoundVersion], Any, None]
+        pass
+
+    @abstractmethod
     def getTotalCompoundSize(self):
         # type: () -> int
         pass
 
     @abstractmethod
     def getTotalCompoundCount(self, with_type=None):
+        # type: (Optional[CompoundType]) -> int
+        pass
+
+    @abstractmethod
+    def getSnapshotCount(self, with_type=None):
         # type: (Optional[CompoundType]) -> int
         pass
 
@@ -337,8 +353,8 @@ class MetaDBInterface(ABC):
         pass
 
     @abstractmethod
-    def removeCompoundByName(self, compoundname):
-        # type: (CompoundName) -> None
+    def removeCompoundByName(self, compoundname, keep_snapshots=False):
+        # type: (CompoundName, bool) -> None
         pass
 
     def getResourceWithReferencedFragmentSize(self):
@@ -415,28 +431,6 @@ class MetaDBInterface(ABC):
         # type: (CompoundHash) -> Compound
         pass
 
-    # @abstractmethod
-    # def getCompoundByStartingName(self, name, compound_type=None):
-    #     # type: (str, Optional[CompoundType]) -> SizedGenerator[Compound]
-    #     pass
-    # @abstractmethod
-    # def hasPendingFragmentWithHash(self, fragment_hash):
-    #     # type: (FragmentHash) -> bool
-    #     """
-    #     returns true, if a fragment exists, which has the given hash and is pending
-    #     """
-    #     pass
-
-    # @abstractmethod
-    # def updateFragmentPedingStatus(self, pending, fragment_ids):
-    #     # type: (FragmentPendingFlag, List[FragmentID]) -> None
-    #     pass
-
-    @abstractmethod
-    def addOverwriteCompound(self, compound):
-        # type: (Compound) -> Compound
-        pass
-
     def getAllFragmentsSortedByCompoundUsage(self):
         # type: () -> SizedGenerator[Tuple[CompoundID, SequenceIndex, Fragment]]
         pass
@@ -449,4 +443,14 @@ class MetaDBInterface(ABC):
     @abstractmethod
     def addOverwriteCompoundAndMapFragments(self, compound, fragment_payload_index):
         # type: (Compound, List[Tuple[Fragment, SequenceIndex]]) -> Compound
+        pass
+
+    @abstractmethod
+    def getSnapshotsOfCompound(self, compound_name, min_version=None, max_version=None, include_live_version=False):
+        # type: (CompoundName, Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
+        """
+
+        :param min_version: Compound.compound_version >= min_version
+        :param max_version: Compound.compound_version &lt= min_version
+        """
         pass

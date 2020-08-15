@@ -1,4 +1,4 @@
-from typing import Type, Tuple, List
+from typing import Type, Tuple, List, Optional
 
 from sqlalchemy import func, asc, and_
 # noinspection PyProtectedMember
@@ -13,7 +13,7 @@ from ImageSaverLib.MetaDB import Base
 from ImageSaverLib.MetaDB.Errors import NotExistingException
 from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
 from ImageSaverLib.MetaDB.SQLAlchemyHelperMixin2 import SQLAlchemyHelperMixin, ExposableGeneratorQuery
-from ImageSaverLib.MetaDB.Types.Compound import Compound
+from ImageSaverLib.MetaDB.Types.Compound import Compound, CompoundVersion
 from ImageSaverLib.MetaDB.Types.CompoundFragmentMapping import CompoundFragmentMapping, SequenceIndex
 from ImageSaverLib.MetaDB.Types.Fragment import Fragment
 from ImageSaverLib.MetaDB.Types.FragmentResourceMapping import FragmentResourceMapping, FragmentOffset
@@ -33,20 +33,24 @@ def init_db(engine, recreate=False):
 class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
 
     def __init__(self, session):
-        # type: (sessionmaker) -> None
+        # type: (scoped_session) -> None
         SQLAlchemyHelperMixin.__init__(self, session)
         MetaDBInterface.__init__(self)
 
     def close(self):
         pass
 
-    def getCompoundByName(self, compound_name):
+    def getCompoundByName(self, compound_name, compound_version=CompoundVersion(None)):
         with self.session_scope() as session:  # type: Session
-            return self._get(session, Compound, Compound.compound_name == compound_name)
+            return self._get(session, Compound,
+                             Compound.compound_name == compound_name,
+                             Compound.compound_version == compound_version)
 
-    def getCompoundByHash(self, compound_hash):
+    def getCompoundByHash(self, compound_hash, compound_version=CompoundVersion(None)):
         with self.session_scope() as session:  # type: Session
-            return self._get(session, Compound, Compound.compound_hash == compound_hash)
+            return self._get(session, Compound,
+                             Compound.compound_hash == compound_hash,
+                             Compound.compound_version == compound_version)
 
     def makeFragment(self, fragment_hash, fragment_size, fragment_payload_size):
         with self.session_scope() as session:  # type: Session
@@ -100,7 +104,31 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
         with self.session_scope() as session:  # type: Session
             return self._get_or_create(session, Compound, None, compound_name=name, compound_type=compound_type,
                                        compound_hash=compound_hash, compound_size=compound_size,
-                                       wrapping_type=wrapping_type, compression_type=compression_type)
+                                       wrapping_type=wrapping_type, compression_type=compression_type,
+                                       compound_version=CompoundVersion(None))
+
+    def makeSnapshottedCompound(self, compound):
+        with self.session_scope() as session:  # type: Session
+            max_version = self._getMaxVersionOfCompound(compound.compound_name, session)
+            snapshot_version = 1 if max_version is None else max_version + 1
+            # print(snapshot_version)
+            return self._create(session, Compound,
+                                compound_name=compound.compound_name,
+                                compound_type=compound.compound_type,
+                                compound_hash=compound.compound_hash,
+                                compound_size=compound.compound_size,
+                                wrapping_type=compound.wrapping_type,
+                                compression_type=compound.compression_type,
+                                compound_version=CompoundVersion(snapshot_version))
+
+    def _getMaxVersionOfCompound(self, compound_name, session):
+        # type: (str, Session) -> Optional[int]
+        query = session.query(func.max(Compound.compound_version))
+        query = query.filter(Compound.compound_name == compound_name)
+        try:
+            return query.one()[0]
+        except NoResultFound:
+            return None
 
     def updateCompound(self, name, compound_type, compound_hash, compound_size, wrapping_type, compression_type):
         with self.session_scope() as session:  # type: Session
@@ -111,45 +139,25 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                                            Compound.wrapping_type: wrapping_type,
                                            Compound.compression_type: compression_type})
 
-    # def setPayloadForCompound(self, compound_id, payload_id):
-    #     with self.session_scope():
-    #         self.session.query(
-    #             Compound
-    #         ).filter(
-    #             Compound.compound_id == compound_id
-    #         ).update(
-    #             {Compound.payload_id: payload_id}
-    #         )
-
-    def hasCompoundWithName(self, name):
+    def hasCompoundWithName(self, name, version=CompoundVersion(None)):
         with self.session_scope() as session:  # type: Session
             try:
-                self._get(session, Compound, Compound.compound_name == name)
+                self._get(session, Compound,
+                          Compound.compound_name == name,
+                          Compound.compound_version == version)
                 return True
             except NotExistingException:
                 return False
 
-    def hasCompoundWithHash(self, compound_hash):
+    def hasCompoundWithHash(self, compound_hash, compound_version=CompoundVersion(None)):
         with self.session_scope() as session:  # type: Session
             try:
-                self._get(session, Compound, Compound.compound_hash == compound_hash)
+                self._get(session, Compound,
+                          Compound.compound_hash == compound_hash,
+                          Compound.compound_version == compound_version)
                 return True
             except NotExistingException:
                 return False
-
-    # def getPayloadForCompound(self, compound_id):
-    #     with self.session_scope():
-    #         return self.session.query(
-    #             Payload
-    #         ).select_from(
-    #             Payload, CompoundPayloadMapping, Compound
-    #         ).filter(
-    #             Compound.compound_id == compound_id,
-    #             CompoundPayloadMapping.compound_id == Compound.compound_id,
-    #             CompoundPayloadMapping.payload_id == Payload.payload_id
-    #         ).first()
-
-    # def getPayloadIndexSortedFragmentsResourcesForPayload(self, payload_id):
 
     def getSequenceIndexSortedFragmentsForCompound(self, compound_id):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
@@ -195,10 +203,11 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             # return [fh for fh, in query.all()]
 
     def getAllCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None,
-                        slash_count=None, min_size=None):
+                        slash_count=None, min_size=None, include_snapshots=False):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
             session = exposed_session.session
             query = session.query(Compound)  # type: Query
+
             if order_alphabetically:
                 # query = query.order_by(asc(collate(Compound.compound_name, 'NOCASE')))
                 query = query.order_by(asc(func.lower(Compound.compound_name)))
@@ -220,6 +229,10 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                 if min_size < 0:
                     raise ValueError('negative minimum file size')
                 query = query.filter(Compound.compound_size >= min_size)
+            if not include_snapshots:
+                query = query.filter(Compound.compound_version.is_(None))
+            else:
+                query = query.order_by(asc(Compound.compound_version))
             return self._exposable_lengen_query(exposed_session, query)
 
     def getAllCompoundsSizeSum(self, type_filter=None, starting_with=None, ending_with=None, slash_count=None,
@@ -242,23 +255,44 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                 if min_size < 0:
                     raise ValueError('negative minimum file size')
                 query = query.filter(Compound.compound_size >= min_size)
+            query = query.filter(Compound.compound_version.is_(None))
             size = query.one()[0]
             return 0 if size is None else int(size)
 
     def getAllCompoundNames(self):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
-            len_gen = self._get_all2(exposed_session, Compound, Compound.compound_id)
+            len_gen = self._get_all2(exposed_session, Compound, Compound.compound_id,
+                                     Compound.compound_version.is_(None))
             return len_gen.add_layer(lambda gen: (c.compound_name for c in gen))
-            # return SizedGenerator((c.compound_name for c in len_gen), len(len_gen))
+
+    def getAllCompoundNamesWithVersion(self, include_snapshots=False):
+        with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
+            if include_snapshots:
+                len_gen = self._get_all2(exposed_session, Compound, Compound.compound_id)
+            else:
+                len_gen = self._get_all2(exposed_session, Compound, Compound.compound_id,
+                                         Compound.compound_version.is_(None))
+            return len_gen.add_layer(lambda gen: ((c.compound_name, c.compound_version) for c in gen))
 
     def getTotalCompoundSize(self):
         with self.session_scope() as session:  # type: Session
-            size = session.query(functions.sum(Compound.compound_size)).one()[0]
+            query = session.query(functions.sum(Compound.compound_size))
+            query = query.filter(Compound.compound_version.is_(None))
+            size = query.one()[0]
             return 0 if size is None else int(size)
 
     def getTotalCompoundCount(self, with_type=None):
         with self.session_scope() as session:  # type: Session
             query = session.query(Compound)  # type: Query
+            query = query.filter(Compound.compound_version.is_(None))
+            if with_type:
+                query = query.filter(Compound.compound_type == with_type)  # type: Query
+            return query.count()
+
+    def getSnapshotCount(self, with_type=None):
+        with self.session_scope() as session:  # type: Session
+            query = session.query(Compound)  # type: Query
+            query = query.filter(Compound.compound_version.isnot(None))
             if with_type:
                 query = query.filter(Compound.compound_type == with_type)  # type: Query
             return query.count()
@@ -272,12 +306,18 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             # query = self.session.query(functions.sum(Compound.compound_size))  # type: Query
             # query = query.select_entity_from(subquery)
 
-            subquery = session.query(Compound.compound_hash,  # .label('compound_hash'),
-                                     Compound.compound_size,  # .label('compound_size'),
+            exclude_version_sq = session.query(Compound.compound_hash,
+                                               Compound.compound_size)  # type: Query
+            exclude_version_sq = exclude_version_sq.filter(Compound.compound_version.is_(None))
+            exclude_version_sq = exclude_version_sq.subquery()
+
+            subquery = session.query(exclude_version_sq.c.compound_hash.label('compound_hash'),
+                                     exclude_version_sq.c.compound_size.label('compound_size'),
                                      # functions.count(Compound.compound_hash)
                                      )  # type: Query
+            subquery = subquery.select_from(exclude_version_sq)
 
-            subquery = subquery.group_by(Compound.compound_hash, Compound.compound_size)
+            subquery = subquery.group_by(exclude_version_sq.c.compound_hash, exclude_version_sq.c.compound_size)
             subquery = subquery.subquery()
 
             query = session.query(functions.sum(subquery.c.compound_size))
@@ -288,7 +328,14 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
 
     def getUniqueCompoundCount(self):
         with self.session_scope() as session:  # type: Session
-            return session.query(Compound.compound_hash).group_by(Compound.compound_hash).count()
+            exclude_version_sq = session.query(Compound.compound_hash)  # type: Query
+            exclude_version_sq = exclude_version_sq.filter(Compound.compound_version.is_(None))
+            exclude_version_sq = exclude_version_sq.subquery()
+
+            query = session.query(exclude_version_sq.c.compound_hash)  # type: Query
+            query = query.select_from(exclude_version_sq)
+            query = query.group_by(exclude_version_sq.c.compound_hash)
+            return query.count()
 
     def getTotalFragmentSize(self):
         with self.session_scope() as session:  # type: Session
@@ -427,16 +474,32 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
 
     def getDuplicateFragmentsCount(self):
         with self.session_scope() as session:  # type: Session
+            sub_query = session.query(CompoundFragmentMapping.fragment_id)  # type: Query
+            sub_query = sub_query.select_from(Compound)
+            sub_query = sub_query.join(CompoundFragmentMapping,
+                                       Compound.compound_id == CompoundFragmentMapping.compound_id)
+            sub_query = sub_query.filter(Compound.compound_version.is_(None))
+            sub_query = sub_query.subquery()
+
             query = session.query(CompoundFragmentMapping.fragment_id,
                                   func.count(CompoundFragmentMapping.fragment_id))
+            query = query.select_entity_from(sub_query)
             query = query.group_by(CompoundFragmentMapping.fragment_id)  # type: Query
             query = query.having(func.count(CompoundFragmentMapping.fragment_id) > 1)
             return query.count()
 
     def getSavedBytesByDuplicateFragments(self):
         with self.session_scope() as session:  # type: Session
+            snapshot_excluded_sq = session.query(CompoundFragmentMapping.fragment_id)  # type: Query
+            snapshot_excluded_sq = snapshot_excluded_sq.select_from(Compound)
+            snapshot_excluded_sq = snapshot_excluded_sq.join(CompoundFragmentMapping,
+                                                             Compound.compound_id == CompoundFragmentMapping.compound_id)
+            snapshot_excluded_sq = snapshot_excluded_sq.filter(Compound.compound_version.is_(None))
+            snapshot_excluded_sq = snapshot_excluded_sq.subquery()
+
             subquery_1 = session.query(CompoundFragmentMapping.fragment_id,
                                        func.count(CompoundFragmentMapping.fragment_id).label('fragment_id_count'))
+            subquery_1 = subquery_1.select_entity_from(snapshot_excluded_sq)
             subquery_1 = subquery_1.group_by(CompoundFragmentMapping.fragment_id)  # type: Query
             subquery_1 = subquery_1.having(func.count(CompoundFragmentMapping.fragment_id) > 1)
             subquery_1 = subquery_1.subquery()
@@ -458,7 +521,9 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
 
     def getMultipleUsedCompoundsCount(self, compound_type=None):
         with self.session_scope() as session:  # type: Session
-            query1 = session.query(Compound.compound_hash, func.count(Compound.compound_hash).label('compound_hash_count'))
+            query1 = session.query(Compound.compound_hash,
+                                   func.count(Compound.compound_hash).label('compound_hash_count'))
+            query1 = query1.filter(Compound.compound_version.is_(None))
             query1 = query1.group_by(Compound.compound_hash)
             query1 = query1.order_by(Compound.compound_hash)
             if compound_type:
@@ -470,7 +535,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             compound_count2, hash_count2 = query.one()
             if hash_count2 is None:
                 hash_count2 = 0
-            return hash_count2-compound_count2
+            return hash_count2 - compound_count2
 
     def getSavedBytesByMultipleUsedCompounds(self):
         with self.session_scope() as session:  # type: Session
@@ -488,6 +553,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             compound_hash_count_label = func.count(Compound.compound_hash).label('compound_hash_count')
             subquery = session.query(Compound.compound_hash, Compound.compound_size,
                                      compound_hash_count_label)  # type: Query
+            subquery = subquery.filter(Compound.compound_version.is_(None))
             subquery = subquery.group_by(Compound.compound_hash, Compound.compound_size)
             subquery = subquery.having(func.count(Compound.compound_hash) > 1)
             # s1 = sum(((s * c) - s for h, s, c in self._non_exposable_lengen_query(subquery) if c > 1))
@@ -682,9 +748,14 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             # return SizedGenerator((i[0] for i in lengen), len(lengen))
             # return [i[0] for i in query.all()]
 
-    def removeCompoundByName(self, compoundname):
+    def removeCompoundByName(self, compoundname, keep_snapshots=False):
         with self.session_scope() as session:  # type: Session
-            self._delete(session, Compound, Compound.compound_name == compoundname)
+            if keep_snapshots:
+                self._delete(session, Compound,
+                             Compound.compound_name == compoundname,
+                             Compound.compound_version.is_(None))
+            else:
+                self._delete(session, Compound, Compound.compound_name == compoundname)
 
     def getResourceWithReferencedFragmentSize(self):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
@@ -756,41 +827,11 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             if not c:
                 raise NotExistingException
 
-    # def hasPendingFragmentWithHash(self, fragment_hash):
-    #     with self.session_scope():
-    #         try:
-    #             fragment = self._get_one(Fragment, Fragment.fragment_hash == fragment_hash)
-    #             return fragment.fragment_pending
-    #         except NotExistingException:
-    #             return False
-
-    # def updateFragmentPedingStatus(self, pending, fragment_ids):
-    #     with self.session_scope():
-    #         query = self.session.query(Fragment)  # type: Query
-    #         for chunk in chunkiterable_gen(fragment_ids, 500):
-    #             assert len(chunk) <= 500
-    #             query.filter(Fragment.fragment_id.in_(chunk)).update({Fragment.fragment_pending: pending}, synchronize_session='fetch')
-
-    def addOverwriteCompound(self, compound):
-        with self.session_scope() as session:  # type: Session
-            try:
-                self._update(session,
-                             Compound,
-                             [Compound.compound_name == compound.compound_name],
-                             {Compound.compound_type: compound.compound_type,
-                              Compound.compound_hash: compound.compound_hash,
-                              Compound.compound_size: compound.compound_size,
-                              Compound.wrapping_type: compound.wrapping_type,
-                              Compound.compression_type: compound.compression_type})
-            except NotExistingException:
-                session.add(compound)
-                session.flush()
-            return self._get_one(session, Compound, Compound.compound_name == compound.compound_name)
-
     def getAllFragmentsSortedByCompoundUsage(self):
         with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
             session = exposed_session.session
-            fragment_distinct = session.query(func.min(CompoundFragmentMapping.compound_id).label('compound_id'), CompoundFragmentMapping.fragment_id)  # type: Query
+            fragment_distinct = session.query(func.min(CompoundFragmentMapping.compound_id).label('compound_id'),
+                                              CompoundFragmentMapping.fragment_id)  # type: Query
             fragment_distinct = fragment_distinct.select_from(CompoundFragmentMapping)
             fragment_distinct = fragment_distinct.group_by(CompoundFragmentMapping.fragment_id)
             fragment_distinct = fragment_distinct.subquery('fragment_distinct')
@@ -800,7 +841,7 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             query = query.select_from(fragment_distinct)
             query = query.outerjoin(CompoundFragmentMapping,
                                     and_(fragment_distinct.c.compound_id == CompoundFragmentMapping.compound_id,
-                                    fragment_distinct.c.fragment_id == CompoundFragmentMapping.fragment_id))
+                                         fragment_distinct.c.fragment_id == CompoundFragmentMapping.fragment_id))
             query = query.outerjoin(Fragment, fragment_distinct.c.fragment_id == Fragment.fragment_id)
             query = query.order_by(fragment_distinct.c.compound_id.asc(), CompoundFragmentMapping.sequence_index.asc())
 
@@ -831,16 +872,20 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             try:
                 self._update(session,
                              Compound,
-                             [Compound.compound_name == compound.compound_name],
+                             [Compound.compound_name == compound.compound_name,
+                              Compound.compound_version == compound.compound_version],
                              {Compound.compound_type: compound.compound_type,
                               Compound.compound_hash: compound.compound_hash,
                               Compound.compound_size: compound.compound_size,
                               Compound.wrapping_type: compound.wrapping_type,
-                              Compound.compression_type: compound.compression_type})
+                              Compound.compression_type: compound.compression_type,
+                              Compound.compound_version: compound.compound_version})
             except NotExistingException:
                 session.add(compound)
                 session.flush()
-            new_compound = self._get_one(session, Compound, Compound.compound_name == compound.compound_name)
+            new_compound = self._get_one(session, Compound,
+                                         Compound.compound_name == compound.compound_name,
+                                         Compound.compound_version == compound.compound_version)
             new_fragment_payload_index = []  # type: List[Tuple[Fragment, SequenceIndex]]
             for fragment, payload_index in fragment_payload_index:
                 new_fragment = self._get_one(session, Fragment, Fragment.fragment_hash == fragment.fragment_hash)
@@ -852,3 +897,18 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
                                                fragment_id=fragment.fragment_id,
                                                sequence_index=sequence_index)
                                           for fragment, sequence_index in new_fragment_payload_index))
+
+    def getSnapshotsOfCompound(self, compound_name, min_version=None, max_version=None, include_live_version=False):
+        with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
+            session = exposed_session.session
+            query = session.query(Compound)  # type: Query
+            query = query.filter(Compound.compound_name == compound_name)
+            if not include_live_version:
+                query = query.filter(Compound.compound_version.isnot(None))
+            if min_version is not None:
+                query = query.filter(Compound.compound_version >= min_version)
+            if max_version is not None:
+                query = query.filter(Compound.compound_version <= max_version)
+            query = query.order_by(Compound.compound_version)
+
+            return self._exposable_lengen_query(exposed_session, query)
