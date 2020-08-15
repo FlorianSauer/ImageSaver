@@ -15,20 +15,22 @@ from ImageSaverLib.Errors import (CompoundManipulatedException, ResourceMissingE
                                   CompoundNotExistingException, FragmentManipulatedException)
 from ImageSaverLib.FragmentCache import FragmentCache
 from ImageSaverLib.Helpers import chunkiterable_gen, get_sha256_of_stream
+from ImageSaverLib.Helpers.ControlledAccess.AccessManager import AccessManager
+from ImageSaverLib.Helpers.ControlledAccess.Context.ExclusiveAccessContext import ExclusiveAccessContext
+from ImageSaverLib.Helpers.ControlledAccess.Context.ParallelAccessContext import ParallelAccessContext
+from ImageSaverLib.Helpers.ControlledAccess.Reserver.ExclusiveMassReserver import ExclusiveMassReserver
+from ImageSaverLib.Helpers.ControlledAccess.Reserver.ParallelMassReserver import ParallelMassReserver
 from ImageSaverLib.Helpers.FileLikeIterator import FileLikeIterator
-from ImageSaverLib.Helpers.NotifyCounter import (AccessManager, ParallelMassReserver, ParallelAccessContext,
-                                                 ExclusiveMassReserver)
-from ImageSaverLib.Helpers.NotifyCounter import ExclusiveAccessContext
 from ImageSaverLib.Helpers.SizedGenerator import SizedGenerator
 from ImageSaverLib.Helpers.TqdmReporter import TqdmUpTo
 from ImageSaverLib.Helpers.WritableStream import openWritableCompound, WritableCompound
 from ImageSaverLib.MetaDB.Errors import NotExistingException
 from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
-from ImageSaverLib.MetaDB.Types.Compound import CompoundName, CompoundType, Compound, CompoundHash
+from ImageSaverLib.MetaDB.Types.Compound import CompoundName, CompoundType, Compound, CompoundHash, CompoundVersion
 from ImageSaverLib.MetaDB.Types.Fragment import FragmentHash, FragmentSize, FragmentID
 from ImageSaverLib.MetaDB.Types.FragmentResourceMapping import FragmentOffset
-from ImageSaverLib.MetaDB.Types.Resource import ResourceName, ResourceID, ResourceSize, ResourceWrappingType, \
-    ResourceCompressionType
+from ImageSaverLib.MetaDB.Types.Resource import (ResourceName, ResourceID, ResourceSize, ResourceWrappingType,
+                                                 ResourceCompressionType)
 from ImageSaverLib.PendingObjectsController import PendingObjectsController
 from ImageSaverLib.Storage.StorageInterface import StorageInterface
 
@@ -48,7 +50,7 @@ class ImageSaver(object):
         self.meta = meta  # type: MetaDBInterface
         self.fragment_size = fragment_size
         self.resource_size = resource_size
-        self.reserved_compounds = AccessManager(CompoundName)
+        self.reserved_compounds = AccessManager(Tuple[CompoundName, CompoundVersion])
         self.reserved_fragments = AccessManager(FragmentHash)
         self.reserved_resources = AccessManager(ResourceName)
         self.wrapper = AutoWrapper()
@@ -138,7 +140,7 @@ class ImageSaver(object):
     def defaultCompoundCompressor(self):
         # type: () -> CompressionType
         return self._compress_type
-    
+
     @defaultCompoundCompressor.setter
     def defaultCompoundCompressor(self, compressor):
         # type: (Union[Type[BaseCompressor], BaseCompressor]) -> None
@@ -198,8 +200,6 @@ class ImageSaver(object):
         )
         self._compress_type = value
 
-
-
     def changeFragmentSize(self, fragmentSize):
         # type: (int) -> None
         self.fragment_size = int(fragmentSize)
@@ -222,21 +222,33 @@ class ImageSaver(object):
         if not read_speed:
             read_speed = fragment_size
 
-        try:
-            compound = self.meta.getCompoundByName(name)
-        except NotExistingException:
-            compound = None
-
-        if compound:
-            if overwrite and pre_calc_stream_hash:
+        compound = None
+        if overwrite and pre_calc_stream_hash:
+            try:
+                compound = self.meta.getCompoundByName(name)
+            except NotExistingException:
+                pass
+            else:
                 stream_hash = CompoundHash(get_sha256_of_stream(stream, read_speed))
                 if compound.compound_hash == stream_hash:
                     raise CompoundAlreadyExistsException(
                         "compound already exists with same payload, overwrite not needed")
-        w_c = openWritableCompound(self.meta, self.fragment_cache, self.reserved_compounds, self.reserved_fragments,
-                                   fragment_size, self.wrapper, self.compresser, wrap_type, compress_type,
-                                   self.pending_objects, name, compound_type, overwrite, compound, False,
-                                   blocking, timeout)
+        w_c = openWritableCompound(meta=self.meta,
+                                   fragment_cache=self.fragment_cache,
+                                   compound_am=self.reserved_compounds,
+                                   fragment_am=self.reserved_fragments,
+                                   fragment_size=fragment_size,
+                                   wrapper=self.wrapper,
+                                   compresser=self.compresser,
+                                   wrap_type=wrap_type,
+                                   compress_type=compress_type,
+                                   pending_objects=self.pending_objects,
+                                   name=name,
+                                   compound_type=compound_type,
+                                   overwrite=overwrite,
+                                   compound=compound,
+                                   blocking=blocking,
+                                   timeout=timeout)
         with w_c:
             stream_size = 0
             while True:
@@ -248,9 +260,10 @@ class ImageSaver(object):
                 if progressreporter is not None:
                     progressreporter.update_to(stream_size)
 
-    def openWritableCompound(self, name, compound_type=Compound.FILE_TYPE, wrap_type=None, compress_type=None,
-                             fragment_size=None, overwrite=False, append=False, blocking=True, timeout=None):
-        # type: (Union[str, CompoundName], Union[str, CompoundType], WrappingType, CompressionType, Union[int, FragmentSize], bool, bool, bool, Optional[float]) -> WritableCompound
+    def openWritableCompound(self, name, compound_type=Compound.FILE_TYPE,
+                             wrap_type=None, compress_type=None, fragment_size=None, overwrite=False, blocking=True,
+                             timeout=None):
+        # type: (Union[str, CompoundName], Union[str, CompoundType], WrappingType, CompressionType, Union[int, FragmentSize], bool, bool, Optional[float]) -> WritableCompound
         # create WritableCompound, which feeds into fragment cache
         # writable compound has no control of fragment cache and meta
         # it can only query for fragments or create fragments
@@ -259,11 +272,6 @@ class ImageSaver(object):
         # the fragment is not yet flushed to a storage
         # reservation of a fragment must be started as soon as its created/hash is created, creating must be exclusive
         # after its added to the fragment cache the reservation type must be changed to parallel
-
-        # if self.meta.hasCompoundWithName(name):
-        #     compound = self.meta.getCompoundByName(name)
-        # else:
-        #     compound = None
 
         name = CompoundName(name)
         compound_type = CompoundType(compound_type)
@@ -289,7 +297,6 @@ class ImageSaver(object):
                                    name=name,
                                    compound_type=compound_type,
                                    overwrite=overwrite,
-                                   append=append,
                                    blocking=blocking,
                                    timeout=timeout)
         return w_c
@@ -298,8 +305,14 @@ class ImageSaver(object):
                   timeout=None, compound_type=Compound.FILE_TYPE, overwrite=False,
                   ):
         # type: (bytes, str, Optional[int], WrappingType, CompressionType, bool, Optional[float], CompoundType, bool) -> None
-        f = self.openWritableCompound(name, compound_type, wrap_type, compress_type, fragment_size,
-                                      overwrite, False, blocking, timeout)
+        f = self.openWritableCompound(name=name,
+                                      compound_type=compound_type,
+                                      wrap_type=wrap_type,
+                                      compress_type=compress_type,
+                                      fragment_size=fragment_size,
+                                      overwrite=overwrite,
+                                      blocking=blocking,
+                                      timeout=timeout)
         with f:
             f.write(data)
 
@@ -308,39 +321,56 @@ class ImageSaver(object):
         return bytes().join(self.loadCompound(name, blocking=blocking, timeout=timeout,
                                               progressreporter=progressreporter))
 
+    def loadCompoundSnapshotBytes(self, name, version, blocking=True, timeout=None, progressreporter=None):
+        # type: (str, int, bool, Optional[float], Optional[TqdmUpTo]) -> bytes
+        return bytes().join(self.loadCompoundSnapshot(name, version, blocking=blocking, timeout=timeout,
+                                                      progressreporter=progressreporter))
+
     def loadCompound(self, name, blocking=True, timeout=None, progressreporter=None):
         # type: (str, bool, Optional[float], Optional[TqdmUpTo]) -> Generator[bytes, None, None]
+        return self.loadCompoundSnapshot(name, CompoundVersion(None), blocking, timeout, progressreporter)
+
+    def loadCompoundSnapshot(self, name, version, blocking=True, timeout=None, progressreporter=None):
+        # type: (str, Optional[int], bool, Optional[float], Optional[TqdmUpTo]) -> Generator[bytes, None, None]
         # Todo: add cache / intelligent cache where duplicate fragments are detected at beginning
 
         name = CompoundName(name)
+        version = CompoundVersion(version)
         downloaded_data = 0
         hasher = hashlib.sha256()
         with self.meta:
             # reserve compound name
-            with ParallelAccessContext(self.reserved_compounds, name, blocking=blocking, timeout=timeout):
+            with ParallelAccessContext(self.reserved_compounds,
+                                       (name, version),
+                                       blocking=blocking, timeout=timeout):
                 # check if compound exists
-                compound = self.pending_objects.getPendingCompoundWithName(name)
+                if version is None:
+                    compound = self.pending_objects.getPendingCompoundWithName(name)
+                else:
+                    compound = None
                 if compound:
-                    _fragment_hashes = self.pending_objects.getFragmentsNeededForPendingCompound(compound.compound_name)
+                    _fragment_hashes = self.pending_objects.getFragmentsNeededForPendingCompoundByName(
+                        compound.compound_name)
                     if compound.compound_size > 0:
                         assert _fragment_hashes is not None and len(_fragment_hashes) > 0
                     fragment_hashes = [f.fragment_hash for f, _ in _fragment_hashes]
                 else:
-                    if not self.meta.hasCompoundWithName(name):
-                        # if not, raise error
+                    try:
+                        compound = self.meta.getCompoundByName(name, version)
+                    except NotExistingException:
                         raise CompoundNotExistingException("no compound found with name " + repr(name))
-                    compound = self.meta.getCompoundByName(name)
                     fragment_hashes = list(self.meta.getFragmentHashesNeededForCompound(compound.compound_id))
-                # print('Compound', compound.compound_id)
+
                 # reserve Payload mapped to compound
-                # if compound.compound_type == compound.FILE_TYPE and not compound.payload_id:
-                #     raise Exception("Payload of Compound vanished")
                 # reserve all fragment names needed for compound
-                # print('fragment hashes', [fh.hex() for fh in fragment_hashes])
                 with ParallelMassReserver(self.reserved_fragments, *fragment_hashes, blocking=blocking,
                                           timeout=timeout) as fragment_reserver:
                     # iterate through fragments, sorted by index
-                    sorted_fragments = self.pending_objects.getFragmentsNeededForPendingCompound(compound.compound_name)
+                    if version is None:
+                        sorted_fragments = self.pending_objects.getFragmentsNeededForPendingCompoundByName(
+                            compound.compound_name)
+                    else:
+                        sorted_fragments = None
                     if sorted_fragments is None:
                         sorted_fragments = list(self.meta.getSequenceIndexSortedFragmentsForCompound(
                             compound.compound_id))
@@ -350,11 +380,7 @@ class ImageSaver(object):
                         assert fragment.fragment_hash in fragment_hashes, repr(
                             (fragment.fragment_hash, 'not in', fragment_hashes))
                         assert self.reserved_fragments.managesValue(fragment.fragment_hash)
-                    # print("sorted_fragments_resources size", len(sorted_fragments_resources))
                     for sequence_index, fragment in sorted_fragments:
-                        # print("payload index", payload_index,
-                        #       "fragment", fragment.fragment_id, fragment.fragment_payload_hash.hex(),
-                        #       "resource", resource.resource_id, resource.resource_hash.hex())
                         fragment_data = self.fragment_cache.loadFragment(fragment)
                         fragment_reserver.unreserveOne(fragment.fragment_hash)
                         fragment_size = FragmentSize(len(fragment_data))
@@ -371,17 +397,12 @@ class ImageSaver(object):
                                                     fragment_data)
                         downloaded_data += len(fragment_data)
 
-                        # print()
-                        # print()
-                        # print('???', type(progressreporter))
-                        # bool(progressreporter)
                         if progressreporter is not None:
                             progressreporter.update_to(downloaded_data, tsize=compound.compound_size)
                         hasher.update(fragment_data)
                         yield fragment_data
 
         if hasher.digest() != compound.compound_hash:
-            # print(hasher.digest(), compound.compound_hash)
             raise CompoundManipulatedException("Total Compound payload hash does not match the saved one in meta.")
         yield b''
 
@@ -398,43 +419,26 @@ class ImageSaver(object):
         deletes all Resources on storage, which are not referenced with a Resource in cache_meta
         """
 
-        # region rework
         if not keep_fragments:
             # get list of not referenced fragments
             # reserve them, delete them
             with self.meta:
-                # print("getting fragments")
                 unreferenced_fragments = list(self.meta.getUnreferencedFragments())
-                # print("getting fragments len")
                 unreferenced_fragments_count = len(unreferenced_fragments)
                 deleted_count = 0
                 if progressreporter_fragments is not None:
                     progressreporter_fragments.update_to(deleted_count, tsize=unreferenced_fragments_count)
-                # unreferenced_fragment_hashes = unreferenced_fragments.add_layer(lambda gen: (f.fragment_hash for f in gen))
                 with ExclusiveMassReserver(self.reserved_fragments,  # values_gen=unreferenced_fragment_hashes,
                                            blocking=blocking, timeout=timeout) as reserver:
-                    # print("pre loop")
                     for chunk_index, fragments_chunk in enumerate(chunkiterable_gen(unreferenced_fragments, 500)):
-                        fragments_chunk_len = len(fragments_chunk)
-                        # for fragment in (f for f in fragments_chunk if f):  # filter None values from chunk tuples
-                        # print("making fragment list of 10")
                         fragments_chunk = list((f for f in fragments_chunk if f))
-                        fragments_chunk_len = len(fragments_chunk)
 
-                        # print("reserving")
                         reserver.reserveAll(*[f.fragment_hash for f in fragments_chunk])
 
-                        # print("deleting")
                         self.meta.deleteFragments(fragments_chunk)
                         deleted_count += len(fragments_chunk)
-                        # print("status")
                         if progressreporter_fragments is not None:
                             progressreporter_fragments.update_to(deleted_count, tsize=unreferenced_fragments_count)
-
-                        # print("unreserving")
-                        # reserver.unreserveAll()
-                    # self.cache_meta.deleteFragments(unreferenced_fragments)
-                    # self.cache_meta.deleteUnreferencedFragments()
 
         with self.meta:
             resources = []  # type: List[Tuple[ResourceName, Optional[ResourceID]]]
@@ -444,27 +448,12 @@ class ImageSaver(object):
                 # reserve them, delete them
                 unreferenced_resources = self.meta.getUnreferencedResources()
                 resources += [(r.resource_name, r.resource_id) for r in unreferenced_resources]
-                # unreferenced_resource_names = [r.resource_name for r in unreferenced_resources]
-                # with ExclusiveMassReserver(self.reserved_resources, *unreferenced_resource_names,
-                #                            blocking=blocking, timeout=timeout) as reserver:
-                #     for resource in unreferenced_resources:
-                #         self.storage.deleteResource(resource.resource_name)
-                #         self.cache_meta.deleteResourceByID(resource.resource_id)
-                #         reserver.unreserveOne(resource.resource_name)
 
             if not keep_unreferenced_resources:
                 # this leaves only resources, which are needed by at least one fragment
                 # now some resources might be in storage, which are not referenced in cache_meta, delete them
                 resource_names = set(self.storage.listResourceNames()) - set(self.meta.getAllResourceNames())
                 resources += [(rn, None) for rn in resource_names]
-                # if not keep_unreferenced_resources:
-                #     with ExclusiveMassReserver(self.reserved_resources, blocking=blocking,
-                #                                timeout=timeout) as resource_reserver:
-                #         resource_names = set(self.storage.listResourceNames()) - set(self.cache_meta.getAllResourceNames())
-                #         resource_reserver.reserveAll(*resource_names)
-                #         for resource_name in resource_names:
-                #             print("removing unreferenced resource", resource_name, "from storage")
-                #             self.storage.deleteResource(resource_name)
 
             resource_names = [t[0] for t in resources]
             resource_count = len(resources)
@@ -477,58 +466,8 @@ class ImageSaver(object):
                     if resource_id:
                         self.meta.deleteResourceByID(resource_id)
                     resource_reserver.unreserveOne(resource_name)
-                    # print(resource_name, resource_count)
                     if progressreporter_resources is not None:
                         progressreporter_resources.update_to(index + 1, tsize=resource_count)
-        # endregion
-
-        #
-        #
-        # # get list of not needed payloads
-        # # reserve them
-        # # garbage collect them
-        # # get list of not needed fragments
-        # # reserve them
-        # # garbage collect them
-        # # get list of not needed resources
-        # # reserve them
-        # # garbage collect them + delete them in storage
-        #
-        # with self.cache_meta:
-        #     # self.cache_meta.collectGarbage(True, True)
-        #     if not keep_resources:
-        #         unneeded_fragments = self.cache_meta.getUnneededFragments()
-        #         unneeded_fragments_hashes = [f.fragment_hash for f in unneeded_fragments]
-        #         unneeded_fragments_len = len(unneeded_fragments)
-        #         # for fragment in unneeded_fragments:
-        #         #     if unneeded_fragments_hashes.count(fragment.fragment_payload_hash) > 1:
-        #         #         print("duplicate fragment", fragment.fragment_id)
-        #         # assert len(unneeded_fragments) == len(set(unneeded_fragments_hashes))
-        #         with ExclusiveMassReserver(self.reserved_fragments,
-        #                                    *unneeded_fragments_hashes,
-        #                                    blocking=blocking, timeout=timeout) as reserved_fragments:
-        #             for index, fragment in enumerate(unneeded_fragments):
-        #                 # print(fragment.fragment_id)
-        #                 try:
-        #                     resource = self.cache_meta.getResourceForFragment(fragment.fragment_id)
-        #                 except NotExistingException:
-        #                     continue
-        #                 finally:
-        #                     reserved_fragments.unreserveOne(fragment.fragment_hash)
-        #                     if progressreporter_resources is not None:
-        #                         progressreporter_resources.update_to(index+1, tsize=unneeded_fragments_len)
-        #                 # print("removing resource", resource.resource_id, resource.resource_name, "from storage")
-        #                 self.storage.deleteResource(resource.resource_name)
-        #                 self.cache_meta.deleteResource(resource.resource_id)
-        #     self.cache_meta.collectGarbage(keep_fragments, keep_resources)
-        #     if not keep_unreferenced_resources:
-        #         with ExclusiveMassReserver(self.reserved_resources, blocking=blocking, timeout=timeout) as resource_reserver:
-        #             for resource_name in (set(self.storage.listResourceNames()) - set(self.cache_meta.getAllResourceNames())):
-        #                 resource_reserver.reserveOne(resource_name)
-        #                 print("removing unreferenced resource", resource_name, "from storage")
-        #                 self.storage.deleteResource(resource_name)
-        #
-        # pass
 
     def optimizeResourceSpace(self, unused_percentage=0.0, blocking=True, timeout=None, progressreporter=None):
         # type: (Optional[float], bool, Optional[float], Optional[TqdmUpTo]) -> None
@@ -550,16 +489,12 @@ class ImageSaver(object):
             for index, (resource, fragment_sizes) in enumerate(resources_fragment_sizes):
                 with ExclusiveAccessContext(self.reserved_resources, resource.resource_name, blocking=blocking,
                                             timeout=timeout):
-                    # print('checking resource', resource, fragment_sizes)
                     hole_size = resource.resource_payloadsize - fragment_sizes
                     if (hole_size / resource.resource_payloadsize) >= unused_percentage:
                         if progressreporter is not None:
                             progressreporter.write(
                                 'can optimize Resource ' + resource.resource_name + ', unused space: ' + "{:3.2f}".format(
                                     ((hole_size / resource.resource_payloadsize) * 100.0)) + ' %')
-                        # print('can optimize Resource '+resource.resource_name+', unused space:',
-                        #       (fragment_sizes / resource.resource_payloadsize) * 100.0, '%')
-                        # noinspection PyProtectedMember
                         old_resource_data = self.fragment_cache.loadResource(resource)
                         new_resource_data = bytes()
                         fragments_count = 0
@@ -575,7 +510,6 @@ class ImageSaver(object):
                                 fragments_count += 1
                                 fragments_id_offset.append(
                                     (fragment.fragment_id, FragmentOffset(fragments_buffer_size)))
-                                # print("reordering", fragment.fragment_id, 'old offset', offset, 'new offset', fragments_buffer_size)
                                 fragments_buffer_size += fragment.fragment_size
                             # noinspection PyProtectedMember
                             resource = self.fragment_cache._upload(new_resource_data, fragments_count=fragments_count)
@@ -591,7 +525,6 @@ class ImageSaver(object):
         However after this operation less resources should be needed (also depends on fragmentcache policy and
         encapsulation)
         """
-        # self.fragment_cache.debug = True
         orig_blacklist = set(self.fragment_cache.resource_reuse_blacklist)
         orig_policy = self.fragment_cache.policy
         with self.meta:
@@ -607,11 +540,8 @@ class ImageSaver(object):
                     self.fragment_cache.resource_reuse_blacklist = {r.resource_hash for r in resources}
                     sort_biggest = True
                     for index, resource in enumerate(resources):
-                        # if resource.resource_payloadsize / self.fragment_cache.resource_size < fill_percentage:
-                        # self.fragment_cache.resource_reuse_blacklist.add(resource.resource_hash)
                         with ExclusiveAccessContext(self.reserved_resources, resource.resource_name, blocking=blocking,
                                                     timeout=timeout):
-                            # fragments = [f for f, _ in self.cache_meta.getFragmentsWithOffsetOnResource(resource.resource_id)]
                             fragments = self.meta.getFragmentsWithOffsetOnResource(resource.resource_id)
                             fragments = fragments.add_layer(lambda gen: (f for f, _ in gen))
                             fragments = sorted(list(fragments), key=lambda f: f.fragment_size, reverse=sort_biggest)
@@ -623,7 +553,6 @@ class ImageSaver(object):
                                     self.fragment_cache.addFragment(fragment_data, fragment, readd=True)
                         if progressreporter is not None:
                             progressreporter.update_to(index + 1, tsize=resources_count)
-                        # self.fragment_cache.resource_reuse_blacklist.remove(resource.resource_hash)
             finally:
                 self.fragment_cache.resource_reuse_blacklist = orig_blacklist
                 self.fragment_cache.policy = orig_policy
@@ -642,11 +571,11 @@ class ImageSaver(object):
             assert 0 <= fill_percentage <= 1
             resources_fragment_sizes = self.meta.getResourceWithReferencedFragmentSize()
             resources_fragment_sizes = [(r, f) for r, f in resources_fragment_sizes if
-                                        (f/self.resource_size <= fill_percentage)]# or
-                                         # r.resource_size/self.resource_size <= fill_percentage)]
+                                        (f / self.resource_size <= fill_percentage)]
             resources_count = len(resources_fragment_sizes)
             if resources_count < 2:
-                progressreporter.write('only one Resource is under the {0}% mark and optimisable, skipping'.format(fill_percentage*100))
+                progressreporter.write(
+                    'only one Resource is under the {0}% mark and optimisable, skipping'.format(fill_percentage * 100))
                 return
             for index, (resource, fragment_sizes) in enumerate(resources_fragment_sizes):
                 with ExclusiveAccessContext(self.reserved_resources, resource.resource_name, blocking=blocking,
@@ -799,32 +728,29 @@ class ImageSaver(object):
                         progressreporter.update_to(processed_size, tsize=total_compound_size)
 
     def listCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None,
-                      slash_count=None):
-        # type: (Optional[CompoundType], bool, Optional[str], Optional[str], Optional[int]) -> SizedGenerator[Compound]
-        return self.meta.getAllCompounds(type_filter, order_alphabetically, starting_with, ending_with, slash_count)
-        # if type_filter:
-        #     return [c for c in self.cache_meta.getAllCompounds() if c.compound_type == type_filter]
-        # else:
+                      slash_count=None, min_size=None, include_snapshots=False):
+        # type: (Optional[CompoundType], bool, Optional[str], Optional[str], Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
+        return self.meta.getAllCompounds(type_filter, order_alphabetically, starting_with, ending_with, slash_count, min_size, include_snapshots)
 
     def getTotalCompoundSize(self):
         # type: () -> int
         return self.meta.getTotalCompoundSize()
-        pass
 
     def getTotalCompoundCount(self, with_type=None):
         # type: (Optional[CompoundType]) -> int
         return self.meta.getTotalCompoundCount(with_type=with_type)
-        pass
+
+    def getSnapshotCount(self, with_type=None):
+        # type: (Optional[CompoundType]) -> int
+        return self.meta.getSnapshotCount(with_type=with_type)
 
     def getUniqueCompoundSize(self):
         # type: () -> int
         return self.meta.getUniqueCompoundSize()
-        pass
 
     def getUniqueCompoundCount(self):
         # type: () -> int
         return self.meta.getUniqueCompoundCount()
-        pass
 
     def getTotalFragmentSize(self):
         # type: () -> int
@@ -833,45 +759,38 @@ class ImageSaver(object):
     def getTotalFragmentCount(self):
         # type: () -> int
         return self.meta.getTotalFragmentCount()
-        pass
 
     def getTotalResourceSize(self):
         # type: () -> int
         return self.meta.getTotalResourceSize()
-        pass
 
     def getTotalResourceCount(self):
         # type: () -> int
         return self.meta.getTotalResourceCount()
-        pass
 
-    def deleteCompound(self, name, blocking=True, timeout=None):
-        # type: (str, bool, Optional[float]) -> None
+    def deleteCompound(self, name, with_snapshots=True, blocking=True, timeout=None):
+        # type: (str, bool, bool, Optional[float]) -> None
         name = CompoundName(name)
         with self.meta:
             # with exclusive reserve name....
-            with ExclusiveAccessContext(self.reserved_compounds, name, blocking=blocking, timeout=timeout):
+            with ExclusiveMassReserver(self.reserved_compounds,
+                                       (name, CompoundVersion(None)),
+                                       blocking=blocking, timeout=timeout) as reserver:
                 self.pending_objects.removeCompoundByName(name)
-                # check if compound by name exist
                 if not self.meta.hasCompoundWithName(name):
                     # if no, error
                     raise CompoundNotExistingException("compound '" + str(name) + "' does not exist")
-                compound = self.meta.getCompoundByName(name)
-                # remove compound-payload mapping
-                # remove compound
-                self.meta.removeCompound(compound.compound_id)
 
-    def deleteCompoundStartingWith(self, name, compound_type=None, blocking=True, timeout=None):
-        # type: (str, Optional[CompoundType], bool, Optional[float]) -> None
+                if with_snapshots:
+                    reserver.reserveAll(*((s_c.compound_name, s_c.compound_version) for s_c in self.meta.getSnapshotsOfCompound(name)))
+                self.meta.removeCompoundByName(name, keep_snapshots=not with_snapshots)
+
+    def deleteCompoundStartingWith(self, name, compound_type=None, with_snapshots=True, blocking=True, timeout=None):
+        # type: (str, Optional[CompoundType], bool, bool, Optional[float]) -> None
         with self.meta:
-            # compounds = self.meta.getCompoundByStartingName(name, compound_type)
             compounds = self.meta.getAllCompounds(type_filter=compound_type, starting_with=name)
             for compound in compounds:
-                with ExclusiveAccessContext(self.reserved_compounds, compound.compound_name, blocking=blocking,
-                                            timeout=timeout):
-                    # remove compound-payload mapping
-                    # remove compound
-                    self.meta.removeCompound(compound.compound_id)
+                self.deleteCompound(compound.compound_name, with_snapshots=with_snapshots, blocking=blocking, timeout=timeout)
 
     def renameCompound(self, old_name, new_name, blocking=True, timeout=None):
         # type: (str, str, bool, Optional[float]) -> None
@@ -879,18 +798,26 @@ class ImageSaver(object):
         new_name = CompoundName(new_name)
         with self.meta:
             # with exclusive reserve name....
-            with ExclusiveAccessContext(self.reserved_compounds, old_name, blocking=blocking, timeout=timeout):
+            with ExclusiveMassReserver(self.reserved_compounds,
+                                       (old_name, CompoundVersion(None)),
+                                       blocking=blocking, timeout=timeout) as compound_reserver:
                 # check if compound by old_name exists
                 if not self.meta.hasCompoundWithName(old_name):
                     # if no, error
-                    raise Exception("compound does not exist")
+                    raise CompoundNotExistingException("compound does not exist")
                 old_compound = self.meta.getCompoundByName(old_name)
-                # with exclusive reserve name....
-                with ExclusiveAccessContext(self.reserved_compounds, new_name, blocking=blocking, timeout=timeout):
+                snapshotted_old_compounds = list(self.meta.getSnapshotsOfCompound(old_compound.compound_name))
+                compound_reserver.reserveAll(*snapshotted_old_compounds)
+                # with exclusive reserve name...
+
+                with ExclusiveMassReserver(self.reserved_compounds,
+                                           (new_name, CompoundVersion(None)),
+                                           blocking=blocking, timeout=timeout) as new_compound_reserver:
+                    new_compound_reserver.reserveAll(*((new_name, c.compound_version) for c in snapshotted_old_compounds))
                     # check if compound by new_name exists
-                    if self.meta.hasCompoundWithName(old_name):
+                    if self.meta.hasCompoundWithName(new_name):
                         # if yes, error
-                        raise Exception("compound already exist")
+                        raise CompoundAlreadyExistsException("compound already exist")
                     # update compound name
                     self.meta.renameCompound(old_compound.compound_name, new_name)
 
@@ -899,25 +826,46 @@ class ImageSaver(object):
         src_name = CompoundName(src_name)
         dst_name = CompoundName(dst_name)
         with self.meta:
-            with ExclusiveMassReserver(self.reserved_compounds, src_name, dst_name, blocking=blocking, timeout=timeout):
+            with ExclusiveMassReserver(self.reserved_compounds,
+                                       (src_name, CompoundVersion(None)), (dst_name, CompoundVersion(None)),
+                                       blocking=blocking, timeout=timeout):
                 if not overwrite and self.meta.hasCompoundWithName(dst_name):
                     raise CompoundAlreadyExistsException("Destination compound already exists")
                 src_compound = self.meta.getCompoundByName(src_name)
-                needed_fragments_with_index = list(((t[1], t[0]) for t in self.meta.getSequenceIndexSortedFragmentsForCompound(src_compound.compound_id)))
-                with ExclusiveMassReserver(self.reserved_fragments, values_gen=(t[0].fragment_hash for t in needed_fragments_with_index)):
+                needed_fragments_with_index = list(((t[1], t[0]) for t in
+                                                    self.meta.getSequenceIndexSortedFragmentsForCompound(
+                                                        src_compound.compound_id)))
+                with ExclusiveMassReserver(self.reserved_fragments,
+                                           values_gen=(t[0].fragment_hash for t in needed_fragments_with_index)):
                     dst_compound = self.meta.makeCompound(dst_name, src_compound.compound_type,
                                                           src_compound.compound_hash, src_compound.compound_size,
                                                           src_compound.wrapping_type, src_compound.compression_type)
                     self.meta.addOverwriteCompoundAndMapFragments(dst_compound, needed_fragments_with_index)
 
-    def wipeAll(self, blocking=True, timeout=None, collect_garbage=False):
-        # type: (bool, Optional[float], bool) -> None
+    def snapshotCompound(self, compound_name, blocking=True, timeout=None):
+        # type: (str, bool, Optional[float]) -> Compound
+        compound_name = CompoundName(compound_name)
+        with self.meta:
+            with ExclusiveMassReserver(self.reserved_compounds,
+                                       (compound_name, CompoundVersion(None)),
+                                       blocking=blocking, timeout=timeout):
+                compound = self.meta.getCompoundByName(compound_name)
+                needed_fragments_with_index = list(
+                    ((t[1], t[0]) for t in self.meta.getSequenceIndexSortedFragmentsForCompound(compound.compound_id)))
+                with ExclusiveMassReserver(self.reserved_fragments,
+                                           values_gen=(t[0].fragment_hash for t in needed_fragments_with_index)):
+                    snapshotted_compound = self.meta.makeSnapshottedCompound(compound)
+                    assert compound.compound_version != snapshotted_compound.compound_version
+                    self.meta.addOverwriteCompoundAndMapFragments(snapshotted_compound, needed_fragments_with_index)
+                    return snapshotted_compound
+
+    def wipeAll(self, blocking=True, timeout=None, collect_garbage=False, include_snapshots=False):
+        # type: (bool, Optional[float], bool, bool) -> None
         with self.meta:
             with ExclusiveMassReserver(self.reserved_compounds, blocking=blocking,
                                        timeout=timeout) as reserved_compounds:
-                compound_names = self.meta.getAllCompoundNames()
+                compound_names = self.meta.getAllCompoundNamesWithVersion(include_snapshots)
                 reserved_compounds.reserveAll(*compound_names)
-                # self.storage.wipeResources()
                 self.meta.truncateAllCompounds()
             if collect_garbage:
                 self.collectGarbage()

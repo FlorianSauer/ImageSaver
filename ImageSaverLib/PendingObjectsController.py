@@ -96,7 +96,7 @@ class PendingObjectsController(object):
                     return c
             return None
 
-    def getFragmentsNeededForPendingCompound(self, name):
+    def getFragmentsNeededForPendingCompoundByName(self, name):
         # type: (CompoundName) -> Optional[List[Tuple[Fragment, SequenceIndex]]]
         with self._mutex:
             for c in self.compound_fragment_sequence_map.keys():
@@ -104,6 +104,20 @@ class PendingObjectsController(object):
                     return list(self.compound_fragment_sequence_map[c])
             return None
 
+    def getFragmentsNeededForPendingCompoundByHash(self, compound_hash):
+        # type: (CompoundHash) -> Optional[List[Tuple[Fragment, SequenceIndex]]]
+        with self._mutex:
+            for c in self.compound_fragment_sequence_map.keys():
+                if c.compound_hash == compound_hash:
+                    return list(self.compound_fragment_sequence_map[c])
+            return None
+
+    def getFragmentHashesNeededForCompound(self, compound_hash):
+        with self._mutex:
+            for c in self.compound_fragment_sequence_map.keys():
+                if c.compound_hash == compound_hash:
+                    return [f.fragment_hash for f, i in self.compound_fragment_sequence_map[c]]
+            return None
 
     def getPendingFragments(self):
         # type: () -> List[Fragment]
