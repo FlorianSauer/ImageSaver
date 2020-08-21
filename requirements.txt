@@ -10,8 +10,6 @@ Crypto
 Pillow
 dropbox
 cryptography
-typing
-Cython
 wrapt
 psycopg2
 pysmb
