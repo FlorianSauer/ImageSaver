@@ -26,6 +26,9 @@ from ImageSaverLib.ImageSaverFS2 import ImageSaverFS
 from ImageSaverLib.ImageSaverLib import ImageSaver
 from ImageSaverLib.MetaDB.MetaDB import MetaDBInterface
 from ImageSaverLib.MetaDB.Types.Compound import Compound
+from ImageSaverLib.Storage.Cache import RamCache
+from ImageSaverLib.Storage.Cache.LocalCache import LocalCache
+from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
 from ImageSaverLib.Storage.StorageInterface import StorageInterface
 from ImageSaverLib.Storage.VerboseStorage import VerboseStorage
 
@@ -263,7 +266,8 @@ class ImageSaverApp(object):
                                        "This does not check the total count of Resources stored in the Storage.")
     clean_parser.add_argument('-os', '--optimize-space',
                               dest='optimize_space',
-                              help="Removes 'Fragment-Holes' in Resources, by downloading said Resources, removing of "
+                              help="Reduces Overall Storage Size, number of uploaded Resources does not change. "
+                                   "Removes 'Fragment-Holes' in Resources, by downloading said Resources, removing of "
                                    "not indexed bytes and re-uploading the remainging bytes as a new Resource. "
                                    "Optionally a percentage Value can be passed, so only Resources with equals or "
                                    "greater procentual large 'Fragment-Holes' get removed. Example: '-os 10' to "
@@ -273,7 +277,8 @@ class ImageSaverApp(object):
 
     clean_parser.add_argument('-of', '--optimize-fullness',
                               dest='optimize_fullness',
-                              help="Combines Fragments of too small or too empty resources into new and better filled "
+                              help="Reduces number of uploaded Resources, Overall Storage Size does not change. "
+                                   "Combines Fragments of too small or too empty resources into new and better filled "
                                    "resources. Optional pass a percentage to optimize all resources, which total "
                                    "fragment size is smaller or equal to the fraction of the maximum resource size. "
                                    "Example: -of 30 will combine all resources, where the total fragment size stored "
@@ -334,6 +339,8 @@ class ImageSaverApp(object):
     def __init__(self):
         self._meta = None  # type: Optional[MetaDBInterface]
         self._storage = None  # type: Optional[StorageInterface]
+        self._ram_cache = None  # type: Optional[RamStorageCache]
+        self._local_cache = None  # type: Optional[LocalCache]
         self._verbose_storage = None  # type: Optional[VerboseStorage]
         self._save_service = None  # type: Optional[ImageSaver]
         self._is_fs = None  # type: Optional[ImageSaverFS]
@@ -404,8 +411,6 @@ class ImageSaverApp(object):
         if self._storage:
             return self._storage
         else:
-            from ImageSaverLib.Storage.Cache.LocalCache import LocalCache
-            from ImageSaverLib.Storage.Cache.RamCache import RamStorageCache
             from ImageSaverLib.Storage.DropboxStorage import DropboxStorage
             from ImageSaverLib.Storage.FileSystemStorage import FileSystemStorage2
             from ImageSaverLib.Storage.GooglePhotosStorage import GooglePhotosStorage
@@ -476,35 +481,38 @@ class ImageSaverApp(object):
                 else:
                     self._storage.max_resource_size = storage.getMaxSupportedResourceSize()
             else:
-                if not self.namespace.no_local_cache:
-                    if parser.has_option('isl', 'local_cache_size'):
-                        try:
-                            local_cache_size = parser.getint('isl', 'local_cache_size')
-                        except ValueError:
-                            self.argparser.error(
-                                'Config invalid, Section "isl" option "local_cache_size" is not an Integer')
-                            exit(1)
-                            return
-                    else:
-                        local_cache_size = 200
-                    if self.namespace.debug:
-                        print('using local cache of size', local_cache_size, file=sys.stderr)
-                    storage = LocalCache(self.meta, storage, cache_size=local_cache_size, debug=False)
-                if not self.namespace.no_ram_cache:
-                    if parser.has_option('isl', 'ram_cache_size'):
-                        try:
-                            ram_cache_size = parser.getint('isl', 'ram_cache_size')
-                        except ValueError:
-                            self.argparser.error(
-                                'Config invalid, Section "isl" option "ram_cache_size" is not an Integer')
-                            exit(1)
-                            return
-                    else:
-                        ram_cache_size = 3
-                    if ram_cache_size > 0:
-                        if self.namespace.debug:
-                            print('using ram cache of size', ram_cache_size, file=sys.stderr)
-                        storage = RamStorageCache(storage, cache_size=ram_cache_size, debug=False)
+                if parser.has_option('isl', 'local_cache_size'):
+                    try:
+                        local_cache_size = parser.getint('isl', 'local_cache_size')
+                    except ValueError:
+                        self.argparser.error(
+                            'Config invalid, Section "isl" option "local_cache_size" is not an Integer')
+                        exit(1)
+                        return
+                else:
+                    local_cache_size = 200
+                if self.namespace.debug:
+                    print('using local cache of size', local_cache_size, file=sys.stderr)
+                storage = LocalCache(self.meta, storage, cache_size=local_cache_size, debug=False)
+                self._local_cache = storage
+                self._local_cache.cache_enabled = not self.namespace.no_local_cache
+                if parser.has_option('isl', 'ram_cache_size'):
+                    try:
+                        ram_cache_size = parser.getint('isl', 'ram_cache_size')
+                    except ValueError:
+                        self.argparser.error(
+                            'Config invalid, Section "isl" option "ram_cache_size" is not an Integer')
+                        exit(1)
+                        return
+                else:
+                    ram_cache_size = 5
+                if self.namespace.debug:
+                    print('using ram cache of size', ram_cache_size, file=sys.stderr)
+                storage = RamStorageCache(storage, cache_size=ram_cache_size, debug=False)
+                self._ram_cache = storage
+                self._ram_cache.cache_enabled = not self.namespace.no_ram_cache
+                if ram_cache_size == 0:
+                    self._ram_cache.cache_enabled = False
                 self._storage = storage
             self._storage = SynchronizedStorage(self._storage)
             return self._storage
@@ -1413,7 +1421,7 @@ class ImageSaverApp(object):
         if self.namespace.list:
             with OSFS(self.PROFILES_PATH) as profiles_dir:
                 for f in profiles_dir.listdir('/'):
-                    # f = fs.path.splitext(fs.path.basename(f))[0]
+                    f = fs.path.splitext(fs.path.basename(f))[0]
                     print(f)
         elif self.namespace.print:
             with self._config_file('r') as f:
@@ -1423,17 +1431,18 @@ class ImageSaverApp(object):
             print(profile_text)
         elif self.namespace.switch:
             with OSFS(self.PROFILES_PATH) as profiles_dir:
-                filenames = profiles_dir.listdir('/')
-                if self.namespace.switch not in filenames:
+                filenames = {fs.path.splitext(fs.path.basename(f))[0]: f for f in profiles_dir.listdir('/')}
+                # todo make .conf extension optional, profiles should also be recognized with the basename
+                if self.namespace.switch not in filenames.keys():
                     self.profile_parser.error("Profile '" + str(self.namespace.switch) + "' does not exist in '" + str(
                         self.PROFILES_PATH) + "'")
-                with profiles_dir.open(self.namespace.switch, mode='rb') as profiles_file:
+                with profiles_dir.open(filenames[self.namespace.switch], mode='rb') as profiles_file:
                     with self._config_file('wb') as config_file:
                         config_file.write(profiles_file.read())
                 print("switched to profile:", self.namespace.switch)
                 with self._config_file('rb') as config_file:
                     config_hash = hashlib.sha256(config_file.read()).hexdigest()
-                orig_hash = profiles_dir.hash(self.namespace.switch, 'sha256')
+                orig_hash = profiles_dir.hash(filenames[self.namespace.switch], 'sha256')
                 assert orig_hash == config_hash, repr((orig_hash, config_hash))
         else:
             with self._config_file('rb') as config_file:
@@ -1442,6 +1451,7 @@ class ImageSaverApp(object):
                 for f in profiles_dir.listdir('/'):
                     # print(f, profiles_dir.hash(f, 'sha256'), config_hash)
                     if profiles_dir.hash(f, 'sha256') == config_hash:
+                        f = fs.path.splitext(fs.path.basename(f))[0]
                         print('currently loaded profile:', f)
                         return
                 print("unknown profile loaded")
