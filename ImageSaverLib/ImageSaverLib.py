@@ -1,6 +1,6 @@
 import hashlib
 import warnings
-from typing import Optional, Union, Type, Tuple, Generator, List, BinaryIO
+from typing import Optional, Union, Type, Tuple, Generator, List, BinaryIO, Iterable
 
 import humanfriendly
 
@@ -729,7 +729,7 @@ class ImageSaver(object):
 
     def listCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None,
                       slash_count=None, min_size=None, include_snapshots=False):
-        # type: (Optional[CompoundType], bool, Optional[str], Optional[str], Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
+        # type: (Optional[Union[CompoundType, Iterable[CompoundType]]], bool, Optional[str], Optional[str], Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
         return self.meta.getAllCompounds(type_filter, order_alphabetically, starting_with, ending_with, slash_count, min_size, include_snapshots)
 
     def getTotalCompoundSize(self):

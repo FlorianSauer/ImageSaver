@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Iterable, Any
+from typing import List, Tuple, Optional, Iterable, Any, Union
 
 from ImageSaverLib.Helpers.SizedGenerator import SizedGenerator
 from ImageSaverLib.MetaDB.Types.Compound import (Compound, CompoundName, CompoundID, CompoundType, CompoundHash,
@@ -126,7 +126,7 @@ class MetaDBInterface(ABC):
 
     @abstractmethod
     def getAllCompounds(self, type_filter=None, order_alphabetically=False, starting_with=None, ending_with=None, slash_count=None, min_size=None, include_snapshots=False):
-        # type: (Optional[CompoundType], bool, Optional[str], Optional[str], Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
+        # type: (Optional[Union[CompoundType, Iterable[CompoundType]]], bool, Optional[str], Optional[str], Optional[int], Optional[int], bool) -> SizedGenerator[Compound]
         pass
 
     @abstractmethod

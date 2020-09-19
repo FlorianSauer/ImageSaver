@@ -214,7 +214,10 @@ class SQLAlchemyMetaDB(MetaDBInterface, SQLAlchemyHelperMixin):
             else:
                 query = query.order_by(Compound.compound_id)
             if type_filter:
-                query = query.filter(Compound.compound_type == type_filter)
+                if isinstance(type_filter, str):
+                    query = query.filter(Compound.compound_type == type_filter)
+                else:
+                    query = query.filter(Compound.compound_type in type_filter)
             if starting_with:
                 query = query.filter(Compound.compound_name.startswith(starting_with))
             if ending_with:
