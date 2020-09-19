@@ -12,6 +12,8 @@ from ImageSaverLib.Storage.StorageInterface import StorageInterface, SizableStor
 from .LCMeta.LCMetaInterface import LCMetaInterface
 from .LCMeta.ResourceAlias import ResourceNameAlias
 from .LCMeta.db_inits import makeSQLiteMeta, makeSQLiteRamMeta
+from ..CacheInterface import CacheInterface
+from ...Errors import StorageError, DownloadError
 
 
 class _CallbackCache(cachetools.LFUCache):
@@ -26,17 +28,17 @@ class _CallbackCache(cachetools.LFUCache):
             self.on_delete(key)
 
 
-class LocalCache(StorageInterface):
+class LocalCache(StorageInterface, CacheInterface):
     def __init__(self, meta, storage, cache_size=50, cache_dir='~/.isl/.isl_cache', ram_cache_meta=False, debug=False):
         # type: (MetaDBInterface, StorageInterface, int, str, bool, bool) -> None
-        super().__init__(debug)
+        StorageInterface.__init__(self, debug)
+        CacheInterface.__init__(self, storage)
         self._cache_workdir = os.path.abspath(os.path.normpath(os.path.expanduser(cache_dir)))
         self._cache_storage_workdir = os.path.join(self._cache_workdir, 'storage')
         os.makedirs(self._cache_storage_workdir, exist_ok=True)
         self._cache_meta_workdir = os.path.join(self._cache_workdir, 'cache_meta')
         os.makedirs(self._cache_meta_workdir, exist_ok=True)
         self._cache_meta_path = os.path.join(self._cache_meta_workdir, 'cache_meta.sqlite')
-        self._storage = storage
         self._meta = meta
         self._local_storage = FileSystemStorage2(self._cache_storage_workdir, debug=debug)
         if ram_cache_meta:
@@ -58,29 +60,35 @@ class LocalCache(StorageInterface):
         self._cache_meta.close()
 
     def supportsWrapType(self, wrap_type):
-        return self._storage.supportsWrapType(wrap_type)
-
-
+        return self.wrapped_storage.supportsWrapType(wrap_type)
 
     def getMaxSupportedResourceSize(self):
-        return self._storage.getMaxSupportedResourceSize()
+        return self.wrapped_storage.getMaxSupportedResourceSize()
 
     def getRequiredWrapType(self):
-        return self._storage.getRequiredWrapType()
+        return self.wrapped_storage.getRequiredWrapType()
 
     def identifier(self):
-        return self._storage.identifier()
+        return self.wrapped_storage.identifier()
 
     def _on_delete(self, resource_name):
         if self._cache_meta.hasAliasForResourceName(resource_name):
             alias = self._cache_meta.getAliasOfResourceName(resource_name)
-            self._local_storage.deleteResource(alias)
+            try:
+                self._local_storage.deleteResource(alias)
+            except StorageError:
+                pass
             self._cache_meta.removeAliasOfResourceName(resource_name)
 
     def loadRessource(self, resource_name):
         try:
+            if not self.cache_enabled:
+                raise KeyError
             alias = self._cache[resource_name]  # raises KeyError
-            data = self._local_storage.loadRessource(alias)
+            try:
+                data = self._local_storage.loadRessource(alias)
+            except DownloadError:
+                raise KeyError
             resource_hash = ResourceHash(hashlib.sha256(data).digest())
             try:
                 meta_resource_hash = self._meta.getResourceByResourceName(resource_name).resource_hash
@@ -92,18 +100,21 @@ class LocalCache(StorageInterface):
                 self._local_storage.deleteResource(alias)
                 raise KeyError
         except KeyError:
-            data = self._storage.loadRessource(resource_name)
-            resource_hash = ResourceHash(hashlib.sha256(data).digest())
-            alias = ResourceNameAlias(self._local_storage.saveResource(data, resource_hash, ResourceSize(len(data))))
-            self._cache[resource_name] = alias
-            self._cache_meta.addAlias(resource_name, alias, resource_hash)
+            data = self.wrapped_storage.loadRessource(resource_name)
+            if self.cache_enabled:
+                resource_hash = ResourceHash(hashlib.sha256(data).digest())
+                alias = ResourceNameAlias(
+                    self._local_storage.saveResource(data, resource_hash, ResourceSize(len(data))))
+                self._cache[resource_name] = alias
+                self._cache_meta.addAlias(resource_name, alias, resource_hash)
         return data
 
     def saveResource(self, resource_data, resource_hash, resource_size):
-        resource_name = self._storage.saveResource(resource_data, resource_hash, resource_size)
-        alias = ResourceNameAlias(self._local_storage.saveResource(resource_data, resource_hash, resource_size))
-        self._cache[resource_name] = alias
-        self._cache_meta.addAlias(resource_name, alias, resource_hash)
+        resource_name = self.wrapped_storage.saveResource(resource_data, resource_hash, resource_size)
+        if self.cache_enabled:
+            alias = ResourceNameAlias(self._local_storage.saveResource(resource_data, resource_hash, resource_size))
+            self._cache[resource_name] = alias
+            self._cache_meta.addAlias(resource_name, alias, resource_hash)
         return resource_name
 
     def deleteResource(self, resource_name):
@@ -118,13 +129,13 @@ class LocalCache(StorageInterface):
                 self._local_storage.deleteResource(alias)
         except KeyError:
             pass
-        self._storage.deleteResource(resource_name)
+        self.wrapped_storage.deleteResource(resource_name)
 
     def listResourceNames(self):
-        return self._storage.listResourceNames()
+        return self.wrapped_storage.listResourceNames()
 
     def wipeResources(self):
-        self._storage.wipeResources()
+        self.wrapped_storage.wipeResources()
 
 
 class SizableLocalCache(SizableStorageInterface, LocalCache):

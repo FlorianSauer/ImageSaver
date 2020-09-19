@@ -23,16 +23,19 @@ class SQLAlchemyLCMeta(LCMetaInterface, SQLAlchemyHelperMixin):
                 self._get_or_create(session, ResourceAlias, init_args=None, resource_name=resource_name,
                                     resource_name_alias=alias, resource_hash=resource_hash)
         except AlreadyExistsException:
-            with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
-                assert len(self._get_all2(exposed_session, ResourceAlias, ResourceAlias.alias_id,
-                                          ResourceAlias.resource_name == resource_name)) == 0
-            with self.exposable_session_scope() as exposed_session:  # type: ExposableGeneratorQuery
-                assert len(self._get_all2(exposed_session, ResourceAlias, ResourceAlias.alias_id,
-                                          ResourceAlias.resource_name_alias == alias)) == 1
             with self.session_scope() as session:  # type: Session
+                try:
+                    self._delete(session, ResourceAlias, ResourceAlias.resource_name == resource_name)
+                except NotExistingException:
+                    pass
                 self._create_or_update(session, ResourceAlias, [ResourceAlias.resource_name_alias == alias],
                                        {ResourceAlias.resource_name: resource_name,
-                                        ResourceAlias.resource_hash: resource_hash})
+                                        # ResourceAlias.resource_name_alias: alias,
+                                        ResourceAlias.resource_hash: resource_hash},
+                                       **dict(resource_name=resource_name,
+                                              resource_name_alias=alias,
+                                              resource_hash=resource_hash)
+                                       )
 
     def getAliasOfResourceName(self, resource_name):
         with self.session_scope() as session:  # type: Session
@@ -65,51 +68,3 @@ class SQLAlchemyLCMeta(LCMetaInterface, SQLAlchemyHelperMixin):
     def getResourceHashForAlias(self, alias):
         with self.session_scope() as session:  # type: Session
             return self._get_one(session, ResourceAlias, ResourceAlias.resource_name_alias == alias)
-
-    # M = TypeVar('M')
-    #
-    # def _get_or_create(self, session, model, init_args=None, **search_kwargs):
-    #     # type: (Session, Type[M], Optional[Dict[str, Any]], **Any) -> M
-    #     """
-    #
-    #     :param model: class to create or get
-    #     :param init_args: the values the instance should have if new generated
-    #     :param search_kwargs: search values
-    #     :return:
-    #     """
-    #     # traceback.print_exc()
-    #     # print(model, init_args, search_kwargs)
-    #     with self.session_scope():
-    #         instance = self.session.query(model).filter_by(**search_kwargs).first()
-    #     if instance:
-    #         # self.session.expunge(instance)
-    #         return instance
-    #     else:
-    #         params = dict((k, v) for k, v in search_kwargs.items() if not isinstance(v, ClauseElement))
-    #         params.update(init_args or {})
-    #         instance = model(**params)
-    #         with self.session_scope():
-    #             # self.session.begin_nested()
-    #             try:
-    #                 self.session.add(instance)
-    #                 self.session.commit()
-    #                 # self.session.expunge(instance)
-    #             except IntegrityError as e:
-    #                 # self.session.rollback()
-    #                 # print("!!!ROLLBACK!!! _get_or_create")
-    #                 raise AlreadyExistsException(
-    #                     "cannot create new model " + model.__name__ + " by " + repr(params) + '; ' + repr(e))
-    #             return instance
-    #
-    # def _delete(self, session, model, *args):
-    #     # type: (Session, Type[M], *BinaryExpression) -> None
-    #     # self.session.begin_nested()
-    #     try:
-    #         session.query(model).filter(*args).delete(synchronize_session='fetch')
-    #         session.flush()
-    #         session.commit()
-    #     except IntegrityError:
-    #         # self.session.rollback()
-    #         # print("!!!ROLLBACK!!! _delete")
-    #
-    #         raise NotExistingException("Not Found " + model.__name__ + " by " + repr(args))

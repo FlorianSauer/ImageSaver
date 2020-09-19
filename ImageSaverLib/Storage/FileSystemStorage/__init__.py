@@ -3,9 +3,11 @@ from typing import Type, Union, Optional, cast
 
 from .Connectors import FileSystemInterface
 from .Connectors.LocalFileSystemConnector import LocalFileSystemConnector
+from .Errors import DeleteError, LoadError
 from .FolderStructurizer import FolderStructurizer
-from ..StorageInterface import AbstractSizableStorageInterface, StorageSize
+from ..Errors import DeleteError as StorageDeleteError, DownloadError
 from ..StorageBuilder import StorageBuilderInterface, str_to_bool, str_to_bytesize
+from ..StorageInterface import AbstractSizableStorageInterface, StorageSize
 from ...Encapsulation.Wrappers import WrappingType
 from ...MetaDB.Types.Resource import ResourceSize
 
@@ -48,7 +50,10 @@ class FileSystemStorage2(AbstractSizableStorageInterface, StorageBuilderInterfac
                    max_storage_size=max_storage_size)
 
     def loadRessource(self, resource_name):
-        return self.structurizer.get(resource_name)
+        try:
+            return self.structurizer.get(resource_name)
+        except LoadError:
+            raise DownloadError()
 
     def saveResource(self, resource_data, resource_hash, resource_size):
         resource_name = self.structurizer.add(resource_data, resource_hash, resource_size)
@@ -57,7 +62,10 @@ class FileSystemStorage2(AbstractSizableStorageInterface, StorageBuilderInterfac
 
     def deleteResource(self, resource_name):
         self.resetCurrentSize()
-        self.structurizer.delete(resource_name)
+        try:
+            self.structurizer.delete(resource_name)
+        except DeleteError:
+            raise StorageDeleteError()
 
     def listResourceNames(self):
         return self.structurizer.list()
